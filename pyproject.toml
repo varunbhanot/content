@@ -6,12 +6,19 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "deepagents>=0.7.32,<0.8",
+    "google-api-python-client>=2.201.0",
+    "google-auth>=2.62.0",
+    "google-auth-oauthlib>=1.5.0",
+    "httpx>=0.28.1",
     "langchain>=1.4",
     "langchain-anthropic>=1.7",
     "langchain-core>=1.0",
     "langgraph>=1.2",
     "python-dotenv>=1.0",
     "pyyaml>=6",
+    "requests>=2.34.2",
+    "trafilatura>=2.3.1",
+    "youtube-transcript-api>=1.2.4",
 ]
 
 [project.scripts]
@@ -24,6 +31,7 @@ dev = [
     "ruff",
     "mypy",
     "types-PyYAML",
+    "types-requests>=2.33.0.20261030",
 ]
 
 [build-system]
@@ -34,13 +42,16 @@ build-backend = "hatchling.build"
 packages = ["src/newsletter_machine"]
 
 [tool.pytest.ini_options]
-markers = ["live: calls the real Anthropic API"]
+markers = [
+    "live: calls real external services (Anthropic API, Gmail, web pages, YouTube); run with -m live",
+]
 addopts = "-m 'not live'"
 testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+extend-exclude = [".claude"]  # plan/report Markdown holds illustrative snippets, not code
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
