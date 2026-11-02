@@ -11,7 +11,8 @@ Varun writes a weekly Substack newsletter (varunbhanot.substack.com) built from 
 - Owner's own report: learning inputs are multi-format (YouTube, videos, articles) and "not structured."
 - External: builders of similar pipelines report voice drift by the 3rd–4th issue unless the agent is grounded in real writing samples and every issue is human-reviewed (Xero newsletter-agent guide).
 - Baseline time per issue: **Assumption - needs measurement** (time the next 1–2 issues done the current way).
-- Baseline subscriber count: **TBD - pull from Substack dashboard.**
+- Baseline subscriber count: Substack shows "hundreds of subscribers" - **exact number TBD from dashboard.**
+- Voice corpus: 23 published posts; owner confirms posts before 2026-05 were hand-written and later ones AI-assisted - the hand-written set is the voice target.
 
 ## Proposed Solution
 
@@ -41,8 +42,8 @@ We'll know we're right when he ships 4 consecutive weekly issues produced with t
 
 ## Open Questions
 
-- [ ] What does a typical issue look like (deep essay vs. roundup, length)? Blocked: Substack not reachable from this session; need 3–5 best posts pasted/committed.
-- [ ] Baseline subscriber count and a concrete growth target.
+- [x] ~~What does a typical issue look like?~~ Resolved: single-topic practical essays on agentic AI in production, ~550–1,400 words by hand (~1,100–1,800 AI-assisted). Corpus in `voice/` (see `voice/README.md`).
+- [ ] Exact baseline subscriber count (Substack shows "hundreds") and a concrete growth target.
 - [ ] Does Managed Deep Agents scheduling (cron) work on the free Developer tier, or need Plus? Product is in beta (docs conflict: public vs. private/US-only).
 - [ ] Will YouTube transcript fetching work from LangSmith cloud IPs, or is a fallback needed?
 - [ ] Confirm inbox choice (see Decisions Log) works on Varun's phone share-sheet flow.
@@ -99,7 +100,7 @@ Manual (non-scheduled) run on one week's real links → one Markdown draft with 
 **Architecture Notes**
 - `deepagents` (Python, MIT, LangGraph runtime): lead editor agent + sub-agents (researcher, writer, voice critic) using built-in planning, `task` delegation, and virtual filesystem for notes/drafts.
 - Models: Sonnet for drafting/critique; Haiku for per-source summarisation to stay within ~$5–7/issue.
-- Voice assets in repo: `voice/samples/*.md` (3–5 best posts) + `voice/style-guide.md` (openings, closings, phrasing, banned words), injected into writer and critic.
+- Voice assets in repo: `voice/samples/hand/` (13 hand-written posts, 2024-11 → 2026-01) are the **voice ground truth**; `voice/samples/ai-assisted/` (10 posts, 2026-05 → 2026-09) are for topic/depth reference only and as examples of AI-isms for the critic. Plus `voice/style-guide.md` (openings, closings, phrasing, banned words), distilled from the hand-written set and injected into writer and critic.
 - Inbox: Gmail label (see Decisions Log), read via Gmail API.
 - Hosting: run locally/CLI first; deploy to LangSmith Managed Deep Agents (free Developer tier) with a weekly schedule once MVP is validated.
 - Output: Markdown file first; optional Substack draft via `python-substack` later.
@@ -137,8 +138,8 @@ Manual (non-scheduled) run on one week's real links → one Markdown draft with 
 
 **Phase 1: Foundations**
 - **Goal**: Runnable deep agent skeleton and voice assets.
-- **Scope**: Project layout, deps, config/secrets via env vars, `voice/samples/`, `voice/style-guide.md`.
-- **Success signal**: A hello-world deep agent runs on Anthropic; 3–5 posts and a style guide are committed.
+- **Scope**: Project layout, deps, config/secrets via env vars, `voice/style-guide.md` distilled from `voice/samples/hand/` (corpus already committed).
+- **Success signal**: A hello-world deep agent runs on Anthropic; style guide committed and approved by Varun.
 
 **Phase 2: Inbox & ingestion**
 - **Goal**: Turn a week of links into clean source text.
