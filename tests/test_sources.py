@@ -140,13 +140,20 @@ def test_read_links_file_accepts_tab_separated_note(tmp_path: Path) -> None:
 
 
 def test_failed_doc_builds_consistent_failure_record() -> None:
-    link = InboxLink(url="https://a.com", note="n", subject="", received_at=NOW)
+    link = InboxLink(url="https://a.com", note="", subject="", received_at=NOW)
     doc = failed_doc(link, "youtube", "boom")
     assert (doc.title, doc.kind, doc.status, doc.text, doc.note, doc.detail) == (
         "https://a.com",
         "youtube",
         "failed",
         "",
-        "n",
+        "",
         "boom",
     )
+
+
+def test_failed_doc_titles_with_note_then_subject_before_url() -> None:
+    with_note = InboxLink(url="https://a.com", note="Real title", subject="Fwd", received_at=NOW)
+    with_subject = InboxLink(url="https://a.com", note="  ", subject="Subj", received_at=NOW)
+    assert failed_doc(with_note, "article", "x").title == "Real title"
+    assert failed_doc(with_subject, "article", "x").title == "Subj"

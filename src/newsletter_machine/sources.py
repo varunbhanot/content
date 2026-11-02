@@ -54,10 +54,14 @@ def _trim_url(url: str) -> str:
 
 
 def failed_doc(link: InboxLink, kind: SourceKind, detail: str) -> SourceDoc:
-    """The one shape of a failed source: title is the URL, body empty, reason in ``detail``."""
+    """The one shape of a failed source: body empty, reason in ``detail``.
+
+    The page title is unknown, so the title falls back to Varun's note, then the email
+    subject, then the URL.
+    """
     return SourceDoc(
         url=link.url,
-        title=link.url,
+        title=link.note.strip() or link.subject.strip() or link.url,
         kind=kind,
         status="failed",
         text="",
