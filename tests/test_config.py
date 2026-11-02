@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from newsletter_machine.config import ConfigError, load_settings
+from newsletter_machine import config
+from newsletter_machine.config import ConfigError, load_ingest_settings, load_settings
 
 
 def test_load_settings_returns_settings_with_defaults(make_voice_dir: Callable[..., Path]) -> None:
@@ -68,3 +69,67 @@ def test_load_settings_reads_process_env_and_dotenv_when_env_is_none(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
     monkeypatch.setenv("NM_VOICE_DIR", str(voice))
     assert load_settings().voice_dir == voice
+
+
+def test_load_ingest_settings_defaults_without_anthropic_key(tmp_path: Path) -> None:
+    settings = load_ingest_settings({}, repo_root=tmp_path)
+    assert settings.gmail_label == "newsletter"
+    assert settings.gmail_client_secrets == tmp_path / ".secrets" / "gmail-client.json"
+    assert settings.gmail_token == tmp_path / ".secrets" / "gmail-token.json"
+    assert settings.fetch_timeout == 20.0
+    assert settings.transcript_languages == ("en",)
+
+
+def test_load_ingest_settings_reads_overrides(tmp_path: Path) -> None:
+    env = {
+        "NM_GMAIL_LABEL": " Reading/Newsletter ",
+        "NM_GMAIL_CLIENT_SECRETS": "/abs/client.json",
+        "NM_GMAIL_TOKEN": "tok.json",
+        "NM_FETCH_TIMEOUT": "5.5",
+        "NM_TRANSCRIPT_LANGUAGES": "en, de ,",
+    }
+    settings = load_ingest_settings(env, repo_root=tmp_path)
+    assert settings.gmail_label == "Reading/Newsletter"
+    assert settings.gmail_client_secrets == Path("/abs/client.json")
+    assert settings.gmail_token == tmp_path / "tok.json"
+    assert settings.fetch_timeout == 5.5
+    assert settings.transcript_languages == ("en", "de")
+
+
+@pytest.mark.parametrize(
+    ("env", "name"),
+    [
+        ({"NM_GMAIL_LABEL": "  "}, "NM_GMAIL_LABEL"),
+        ({"NM_FETCH_TIMEOUT": "soon"}, "NM_FETCH_TIMEOUT"),
+        ({"NM_FETCH_TIMEOUT": "0"}, "NM_FETCH_TIMEOUT"),
+        ({"NM_FETCH_TIMEOUT": "nan"}, "NM_FETCH_TIMEOUT"),
+        ({"NM_TRANSCRIPT_LANGUAGES": " , "}, "NM_TRANSCRIPT_LANGUAGES"),
+    ],
+)
+def test_load_ingest_settings_rejects_invalid_values(
+    env: dict[str, str], name: str, tmp_path: Path
+) -> None:
+    with pytest.raises(ConfigError, match=name):
+        load_ingest_settings(env, repo_root=tmp_path)
+
+
+def test_load_ingest_settings_reads_process_env_when_env_is_none(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("NM_GMAIL_LABEL", "from-env")
+    assert load_ingest_settings().gmail_label == "from-env"
+
+
+def test_load_ingest_settings_parses_allowed_senders(tmp_path: Path) -> None:
+    assert load_ingest_settings({}, repo_root=tmp_path).gmail_allowed_senders == ("me",)
+    env = {"NM_GMAIL_ALLOWED_SENDERS": "me, work@example.com"}
+    settings = load_ingest_settings(env, repo_root=tmp_path)
+    assert settings.gmail_allowed_senders == ("me", "work@example.com")
+
+
+@pytest.mark.parametrize("value", [" , ", "a b@example.com", "x{y}"])
+def test_load_ingest_settings_rejects_bad_allowed_senders(value: str, tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="NM_GMAIL_ALLOWED_SENDERS"):
+        load_ingest_settings({"NM_GMAIL_ALLOWED_SENDERS": value}, repo_root=tmp_path)
