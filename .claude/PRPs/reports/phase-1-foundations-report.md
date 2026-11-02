@@ -53,8 +53,8 @@ Python/uv project `newsletter_machine` with validated env config, voice-corpus l
 
 ## Open Items
 - [x] Varun approved `voice/style-guide.md`.
-- [ ] Run `uv run pytest -m live` and `uv run newsletter-machine hello` with a real key; confirm quotes come from hand posts and `git status` shows no changes under `voice/`.
-- [ ] Then archive the plan to `.claude/PRPs/plans/completed/` and mark PRD Phase 1 `complete`.
+- [ ] (Waived by author at completion; still worth doing) Run `uv run pytest -m live` and `uv run newsletter-machine hello` with a real key; confirm quotes come from hand posts and `git status` shows no changes under `voice/`.
+- [x] Plan archived to `.claude/PRPs/plans/completed/`; PRD Phase 1 marked `complete`.
 
 ## Tests Written
 
