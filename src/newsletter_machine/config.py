@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def load_settings(
 ) -> Settings:
     """Load settings from ``env`` (or ``.env`` + process env when ``env`` is None)."""
     if env is None:
-        load_dotenv()
+        load_dotenv(find_dotenv(usecwd=True))
         env = os.environ
 
     api_key = env.get("ANTHROPIC_API_KEY", "").strip()

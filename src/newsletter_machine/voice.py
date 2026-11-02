@@ -35,7 +35,10 @@ def _split_front_matter(path: Path, text: str) -> tuple[dict[str, Any], str]:
         )
     except StopIteration:
         raise ValueError(f"{path}: unterminated front-matter") from None
-    meta = yaml.safe_load("\n".join(lines[1:end]))
+    try:
+        meta = yaml.safe_load("\n".join(lines[1:end]))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"{path}: invalid front-matter YAML: {exc}") from exc
     if not isinstance(meta, dict):
         raise ValueError(f"{path}: front-matter is not a mapping")
     return meta, "\n".join(lines[end + 1 :]).lstrip("\n")
@@ -46,11 +49,17 @@ def _parse_sample(path: Path, folder_era: Era) -> VoiceSample:
     if meta.get("era") != folder_era:
         raise ValueError(f"{path}: era {meta.get('era')!r} disagrees with folder {folder_era!r}")
     try:
+        sample_date = meta["date"]
+        words = meta.get("words")
+        if not isinstance(sample_date, date):
+            raise ValueError(f"{path}: 'date' must be a YYYY-MM-DD date, got {sample_date!r}")
+        if words is not None and (isinstance(words, bool) or not isinstance(words, int)):
+            raise ValueError(f"{path}: 'words' must be an integer, got {words!r}")
         return VoiceSample(
             title=str(meta["title"]),
-            date=meta["date"],
+            date=sample_date,
             url=str(meta["url"]),
-            words=meta.get("words"),
+            words=words,
             era=folder_era,
             path=path,
             body=body,
@@ -62,6 +71,9 @@ def _parse_sample(path: Path, folder_era: Era) -> VoiceSample:
 def load_voice_corpus(voice_dir: Path, era: Era | None = None) -> tuple[VoiceSample, ...]:
     """Load samples sorted by date, optionally restricted to one era."""
     eras = (era,) if era else get_args(Era)
+    for folder_era in eras:
+        if not (voice_dir / "samples" / folder_era).is_dir():
+            raise ValueError(f"Voice corpus folder missing: {voice_dir}/samples/{folder_era}")
     samples = [
         _parse_sample(path, folder_era)
         for folder_era in eras

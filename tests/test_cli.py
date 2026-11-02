@@ -4,8 +4,14 @@ from typing import Any
 
 import pytest
 
-from newsletter_machine import cli
+from newsletter_machine import cli, config
 from newsletter_machine.cli import extract_text, main
+
+
+@pytest.fixture(autouse=True)
+def _ignore_real_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests hermetic: never load the developer's real .env."""
+    monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: False)
 
 
 def test_cli_hello_exits_2_without_api_key(
@@ -66,3 +72,30 @@ def test_cli_hello_exits_1_when_agent_fails(
     monkeypatch.setattr(cli, "build_hello_agent", lambda settings: _Boom())
     assert main(["hello"]) == 1
     assert "network down" in capsys.readouterr().err
+
+
+def test_cli_invalid_log_level_falls_back_without_crashing(
+    monkeypatch: pytest.MonkeyPatch, make_voice_dir: Callable[..., Path]
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("NM_VOICE_DIR", str(make_voice_dir()))
+    monkeypatch.setenv("LOG_LEVEL", "verbose")
+    monkeypatch.setattr(cli, "build_hello_agent", lambda settings: _FakeAgent())
+    assert main(["hello"]) == 0
+
+
+def test_cli_agent_failure_prints_message_once(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    make_voice_dir: Callable[..., Path],
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("NM_VOICE_DIR", str(make_voice_dir()))
+
+    class _Boom:
+        def invoke(self, payload: dict[str, Any]) -> dict[str, Any]:
+            raise RuntimeError("network down")
+
+    monkeypatch.setattr(cli, "build_hello_agent", lambda settings: _Boom())
+    main(["hello"])
+    assert capsys.readouterr().err.count("network down") == 1

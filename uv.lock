@@ -1071,7 +1071,10 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "deepagents" },
+    { name = "langchain" },
     { name = "langchain-anthropic" },
+    { name = "langchain-core" },
+    { name = "langgraph" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
 ]
@@ -1088,7 +1091,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "deepagents", specifier = ">=0.7.32,<0.8" },
+    { name = "langchain", specifier = ">=1.4" },
     { name = "langchain-anthropic", specifier = ">=1.7" },
+    { name = "langchain-core", specifier = ">=1.0" },
+    { name = "langgraph", specifier = ">=1.2" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6" },
 ]
