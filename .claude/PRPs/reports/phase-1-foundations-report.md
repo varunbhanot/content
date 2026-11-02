@@ -52,7 +52,7 @@ Python/uv project `newsletter_machine` with validated env config, voice-corpus l
 - Fake chat model needed the `bind_tools` override the plan anticipated.
 
 ## Open Items
-- [ ] Varun reviews/approves or edits `voice/style-guide.md` (change `status:` in its front-matter when approved).
+- [x] Varun approved `voice/style-guide.md`.
 - [ ] Run `uv run pytest -m live` and `uv run newsletter-machine hello` with a real key; confirm quotes come from hand posts and `git status` shows no changes under `voice/`.
 - [ ] Then archive the plan to `.claude/PRPs/plans/completed/` and mark PRD Phase 1 `complete`.
 

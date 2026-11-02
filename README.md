@@ -6,7 +6,7 @@ hand-written voice corpus.
 
 - Product plan: [`.claude/PRPs/prds/newsletter-content-machine.prd.md`](.claude/PRPs/prds/newsletter-content-machine.prd.md)
 - Voice corpus and split rule: [`voice/README.md`](voice/README.md)
-- Voice style guide (draft, pending approval): [`voice/style-guide.md`](voice/style-guide.md)
+- Voice style guide (approved): [`voice/style-guide.md`](voice/style-guide.md)
 
 ## Setup
 

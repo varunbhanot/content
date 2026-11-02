@@ -1,12 +1,12 @@
 ---
 title: "Voice style guide: Beyond the AI Demo"
-status: draft-pending-approval
+status: approved
 derived_from: voice/samples/hand (13 posts, 2024-11 to 2026-01)
 ---
 
 # Voice style guide
 
-> **Status: DRAFT. Needs Varun's review and approval before Phase 3 uses it.**
+> **Status: APPROVED by Varun.**
 > Every rule below is backed by a quote from `voice/samples/hand/` (file named in brackets).
 > Nothing is derived from `ai-assisted/` except the **Avoid** list.
 
