@@ -40,7 +40,8 @@ Python/uv project `newsletter_machine` with validated env config, voice-corpus l
 `pyproject.toml`, `uv.lock`, `.python-version`, `.gitignore`, `.env.example`, `README.md` (updated), `src/newsletter_machine/{__init__,config,voice,agent,cli}.py`, `tests/{conftest,test_config,test_voice,test_agent,test_cli}.py`, `voice/style-guide.md`, PRD row link.
 
 ## Deviations from Plan
-- **Em-dash avoid rule dropped.** Plan listed "heavy em-dash chains" as an AI-ism. Counts contradict it (47 em dashes in hand posts vs 6 in AI-assisted), so the guide states it is not a distinguishing marker. Varun should confirm.
+- **Em dashes added to Avoid by author decision.** The counts (47 hand vs 6 AI-assisted) show they are not an AI tell, but Varun chose to avoid them in new drafts anyway.
+- **Formulaic opener flagged.** "Here's the uncomfortable truth" opens only 2 of 13 hand posts; the guide now says not to reuse it by default.
 - **"quietly" softened to "allow rarely".** It appears twice in hand posts (8 in AI-assisted), so an outright ban would be wrong.
 - **Plan not archived and PRD left `in-progress`.** The plan makes style-guide approval a completion gate and the live test is unrun.
 - `build_hello_agent` returns `CompiledStateGraph` with a `type: ignore[type-arg]` (generic params not worth spelling out).

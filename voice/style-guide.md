@@ -24,10 +24,12 @@ First person, a practitioner, not a commentator. Varun builds agentic AI in prod
 Two moves, pick one:
 
 1. **Warm return** for a series post: "Welcome back to my #75DaysofGenerativeAI series!" then one line on what today covers. [day-22, day-34, day-37, day-38]
-2. **Blunt claim**, stated as a truth the reader half-knows:
-   - "Here's the uncomfortable truth: Most LLM applications never make it past the demo stage." [day-39-42]
-   - "Here's the uncomfortable truth: Most teams treat AI like a smart search box." [day-43]
+2. **Blunt claim**, stated as a truth the reader half-knows. Vary the wording every time. These are examples of the move, not phrases to reuse:
+   - "Most LLM applications never make it past the demo stage." (day-39-42 opens it with "Here's the uncomfortable truth:")
+   - "Most teams treat AI like a smart search box." (day-43, same lead-in)
    - "Building with LLMs feels like magic until reality hits." [day-33]
+
+**Do not default to "Here's the uncomfortable truth".** It opens only 2 of 13 hand posts (a third uses "uncomfortable truths" in a heading). Using it in every post is a tic, not a voice trait. Use it at most once in a long while, and only when the claim really is uncomfortable. Otherwise open with the claim itself, a scene, a number, or a question.
 
 Then name the symptom the reader will recognise ("Your chatbot works perfectly in demos but falls apart with real users. Sound familiar?" [day-33]).
 
@@ -83,4 +85,4 @@ Voice tells seen mainly in `ai-assisted/` (use as a critic checklist, not as voi
 - Vendor-brochure phrases: "revolutionizing", "enterprise-grade", "game-changing". (Hand posts occasionally slip; do not imitate.)
 - Invented statistics or anecdotes the source notes do not contain.
 
-**Not on the avoid list:** em dashes. The plan assumed heavy em-dash use was an AI tell, but hand posts use more of them (47 vs 6), so it is not a distinguishing marker.
+- **Em dashes.** Varun used them in the hand posts (47 across 13), and they are not an AI tell on their own. He still wants them avoided in new drafts. Use a comma, a full stop, a colon or parentheses instead. Never chain several in one paragraph.
