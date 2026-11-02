@@ -11,7 +11,7 @@ Varun writes a weekly Substack newsletter (varunbhanot.substack.com) built from 
 - Owner's own report: learning inputs are multi-format (YouTube, videos, articles) and "not structured."
 - External: builders of similar pipelines report voice drift by the 3rd–4th issue unless the agent is grounded in real writing samples and every issue is human-reviewed (Xero newsletter-agent guide).
 - Baseline time per issue: **Assumption - needs measurement** (time the next 1–2 issues done the current way).
-- Baseline subscriber count: Substack shows "hundreds of subscribers" - **exact number TBD from dashboard.**
+- Baseline subscriber count: **272** (owner, 2026-11-02).
 - Voice corpus: 23 published posts; owner confirms posts before 2026-05 were hand-written and later ones AI-assisted - the hand-written set is the voice target.
 
 ## Proposed Solution
@@ -21,7 +21,7 @@ A personal multi-agent system built with LangChain `deepagents` on Anthropic mod
 ## Key Hypothesis
 
 We believe a deep agent grounded in Varun's past posts and fed his weekly links will produce newsletter drafts that need ≤30 minutes of editing.
-We'll know we're right when he ships 4 consecutive weekly issues produced with the system, with ≤30 min edit time on each, and subscriber count trends upward over that period.
+We'll know we're right when he ships 4 consecutive weekly issues produced with the system, with ≤30 min edit time on each, and subscribers grow at ≥+90/month (on track for 1,000 by mid-2027).
 
 ## What We're NOT Building
 
@@ -37,13 +37,14 @@ We'll know we're right when he ships 4 consecutive weekly issues produced with t
 |--------|--------|--------------|
 | Publishing cadence | 1 issue/week, 4 weeks straight | Substack archive |
 | Edit time per draft | ≤30 min | Self-timed per issue |
-| Subscriber growth | Upward trend; target TBD vs. baseline | Substack dashboard, weekly |
+| Subscribers | 272 → **1,000** (+728). Proposed pace ~+90/month: 500 by 2027-02-28, 1,000 by 2027-06-30 | Substack dashboard, weekly |
 | API cost | ≤$20–30/month (~$5–7/issue) | Anthropic console usage |
 
 ## Open Questions
 
 - [x] ~~What does a typical issue look like?~~ Resolved: single-topic practical essays on agentic AI in production, ~550–1,400 words by hand (~1,100–1,800 AI-assisted). Corpus in `voice/` (see `voice/README.md`).
-- [ ] Exact baseline subscriber count (Substack shows "hundreds") and a concrete growth target.
+- [x] ~~Baseline subscriber count and growth target~~ Resolved: 272 on 2026-11-02; target 1,000 (see Success Metrics).
+- [ ] Is weekly in-voice content alone enough to reach 1,000, or do distribution helpers (Substack Notes / LinkedIn snippets) need to move from Could to Must?
 - [ ] Does Managed Deep Agents scheduling (cron) work on the free Developer tier, or need Plus? Product is in beta (docs conflict: public vs. private/US-only).
 - [ ] Will YouTube transcript fetching work from LangSmith cloud IPs, or is a fallback needed?
 - [ ] Confirm inbox choice (see Decisions Log) works on Varun's phone share-sheet flow.
