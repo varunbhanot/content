@@ -11,7 +11,7 @@ Varun writes a weekly Substack newsletter (varunbhanot.substack.com) built from 
 - Owner's own report: learning inputs are multi-format (YouTube, videos, articles) and "not structured."
 - External: builders of similar pipelines report voice drift by the 3rd–4th issue unless the agent is grounded in real writing samples and every issue is human-reviewed (Xero newsletter-agent guide).
 - Baseline time per issue: **Assumption - needs measurement** (time the next 1–2 issues done the current way).
-- Baseline subscriber count: **272** (owner, 2026-11-02).
+- Baseline subscriber count: **272** (owner, 2026-11-02), accumulated over ~24 months since the first post (2024-11-22) at an irregular cadence - roughly **11/month**.
 - Voice corpus: 23 published posts; owner confirms posts before 2026-05 were hand-written and later ones AI-assisted - the hand-written set is the voice target.
 
 ## Proposed Solution
@@ -21,7 +21,7 @@ A personal multi-agent system built with LangChain `deepagents` on Anthropic mod
 ## Key Hypothesis
 
 We believe a deep agent grounded in Varun's past posts and fed his weekly links will produce newsletter drafts that need ≤30 minutes of editing.
-We'll know we're right when he ships 4 consecutive weekly issues produced with the system, with ≤30 min edit time on each, and subscribers grow at ≥+90/month (on track for 1,000 by mid-2027).
+We'll know we're right when he ships 4 consecutive weekly issues produced with the system, with ≤30 min edit time on each, and subscribers grow at ≥+30/month (vs. ~11/month historically).
 
 ## What We're NOT Building
 
@@ -29,7 +29,8 @@ We'll know we're right when he ships 4 consecutive weekly issues produced with t
 - Multi-user / product features - personal tool only.
 - Topic selection for him - he chooses what to learn; agents work from his inputs.
 - Automated evals (DeepEval etc.) - explicitly deferred by owner for now.
-- Social clips, cross-posting, analytics - deferred past v1.
+- Substack Notes / LinkedIn snippets - planned as a **separate add-on** (own PRD) to push from baseline toward 1,000 subscribers.
+- Analytics - deferred past v1.
 
 ## Success Metrics
 
@@ -37,14 +38,15 @@ We'll know we're right when he ships 4 consecutive weekly issues produced with t
 |--------|--------|--------------|
 | Publishing cadence | 1 issue/week, 4 weeks straight | Substack archive |
 | Edit time per draft | ≤30 min | Self-timed per issue |
-| Subscribers | 272 → **1,000** (+728). Proposed pace ~+90/month: 500 by 2027-02-28, 1,000 by 2027-06-30 | Substack dashboard, weekly |
+| Subscribers (v1 baseline) | 272 → **~450 by 2027-06-30** (≥+30/month, ~3× the historical ~11/month) from consistent weekly publishing alone | Substack dashboard, weekly |
+| Subscribers (long-term) | **1,000** - owned by the future distribution add-on, not v1 | Substack dashboard |
 | API cost | ≤$20–30/month (~$5–7/issue) | Anthropic console usage |
 
 ## Open Questions
 
 - [x] ~~What does a typical issue look like?~~ Resolved: single-topic practical essays on agentic AI in production, ~550–1,400 words by hand (~1,100–1,800 AI-assisted). Corpus in `voice/` (see `voice/README.md`).
 - [x] ~~Baseline subscriber count and growth target~~ Resolved: 272 on 2026-11-02; target 1,000 (see Success Metrics).
-- [ ] Is weekly in-voice content alone enough to reach 1,000, or do distribution helpers (Substack Notes / LinkedIn snippets) need to move from Could to Must?
+- [x] ~~Do distribution helpers need to be in v1?~~ Resolved: no. v1 sets the content-only baseline; Substack Notes / LinkedIn becomes a separate add-on PRD aimed at the 1,000 goal.
 - [ ] Does Managed Deep Agents scheduling (cron) work on the free Developer tier, or need Plus? Product is in beta (docs conflict: public vs. private/US-only).
 - [ ] Will YouTube transcript fetching work from LangSmith cloud IPs, or is a fallback needed?
 - [ ] Confirm inbox choice (see Decisions Log) works on Varun's phone share-sheet flow.
@@ -78,7 +80,7 @@ Other newsletter writers, teams, and readers - this is a single-owner personal t
 | Must | Voice-grounded draft (past posts + style guide) with voice-critic pass | Fixes "generic AI writing" - the core pain |
 | Should | Weekly scheduled run on Managed Deep Agents | Removes the manual trigger; depends on tier/beta |
 | Should | Substack draft creation via unofficial `python-substack` | Saves copy-paste; unofficial API may break |
-| Could | Subject-line options, social snippets | Growth helpers |
+| Could | Subject-line options | Small growth helper |
 | Won't (v1) | Auto-publish, evals, analytics, multi-user | See "What We're NOT Building" |
 
 ### MVP Scope
@@ -178,6 +180,7 @@ Phases 2 and 3 are independent once the foundation exists - ingestion produces t
 | Link inbox | Gmail: email links to `varunbhanot+newsletter@gmail.com` (filter → label) | Notion, Telegram bot, repo file | "Most convenient, nothing fancy": works from any phone/desktop share sheet, no new app or bot |
 | v1 output | Markdown draft + sources | Direct Substack draft | No official Substack API; unofficial one may break |
 | Evals | Deferred | DeepEval | Owner: "forget evals for now" |
+| Growth target | v1 = content-only baseline (≥+30/month); 1,000 via later distribution add-on | 1,000 ASAP in v1 | Measure what consistent content alone does before adding distribution |
 
 ---
 
