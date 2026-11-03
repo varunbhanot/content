@@ -8,6 +8,7 @@ from newsletter_machine.config import (
     ConfigError,
     load_editor_settings,
     load_ingest_settings,
+    load_planner_model,
     load_settings,
 )
 
@@ -226,3 +227,20 @@ def test_issue_only_settings_do_not_break_other_commands(
     settings = load_settings(bad)  # hello and draft never read them
     with pytest.raises(ConfigError, match="NM_EDITOR_MODEL"):
         load_editor_settings(settings, bad)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"), [("", "anthropic:w"), (" anthropic:p ", "anthropic:p")]
+)
+def test_planner_model_defaults_to_writer_model(
+    make_voice_dir: Callable[..., Path], value: str, expected: str
+) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    env = {**env, "NM_WRITER_MODEL": "anthropic:w", "NM_PLANNER_MODEL": value}
+    assert load_planner_model(load_settings(env), env) == expected
+
+
+def test_planner_model_requires_provider_prefix(make_voice_dir: Callable[..., Path]) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir()), "NM_PLANNER_MODEL": "p"}
+    with pytest.raises(ConfigError, match="NM_PLANNER_MODEL"):
+        load_planner_model(load_settings(env), env)

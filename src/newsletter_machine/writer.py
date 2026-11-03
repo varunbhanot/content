@@ -48,12 +48,12 @@ def neutralise_tags(text: str) -> str:
     return WRAPPER_TAG.sub(r"&lt;\1", text)
 
 
-def _source_text(doc: SourceDoc) -> str:
+def _source_text(doc: SourceDoc, max_chars: int) -> str:
     text = neutralise_tags(doc.text)
-    if len(text) <= MAX_SOURCE_CHARS:
+    if len(text) <= max_chars:
         return text
-    extra = len(text) - MAX_SOURCE_CHARS
-    return f"{text[:MAX_SOURCE_CHARS]}\n[truncated: {extra} more characters]"
+    extra = len(text) - max_chars
+    return f"{text[:max_chars]}\n[truncated: {extra} more characters]"
 
 
 def _attrs(doc: SourceDoc, index: int) -> str:
@@ -68,9 +68,9 @@ def _attrs(doc: SourceDoc, index: int) -> str:
     return " ".join(f'{key}="{html.escape(value)}"' for key, value in pairs.items() if value)
 
 
-def format_source(doc: SourceDoc, index: int) -> str:
-    """One source wrapped in a ``<source>`` tag; its text is untrusted data."""
-    return f"<source {_attrs(doc, index)}>\n{_source_text(doc)}\n</source>"
+def format_source(doc: SourceDoc, index: int, max_chars: int = MAX_SOURCE_CHARS) -> str:
+    """One source wrapped in a ``<source>`` tag, cut at ``max_chars``; its text is untrusted."""
+    return f"<source {_attrs(doc, index)}>\n{_source_text(doc, max_chars)}\n</source>"
 
 
 def format_sources(docs: Iterable[SourceDoc]) -> str:

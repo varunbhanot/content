@@ -36,6 +36,7 @@ NON_SLUG_CHARS = re.compile(r"[^a-z0-9]+")
 YAML_LINE_WIDTH = 1000
 OUTPUT_NAME = re.compile(r"\d{2,}-[a-z0-9-]+\.md")
 OUTPUT_SIGNATURE = "---\nurl: "  # every file render_source writes starts with this
+SOURCES_SUFFIX = ".sources"  # issue.md -> issue.sources/ beside it
 
 
 def _ingest_one(
@@ -93,6 +94,11 @@ def _previous_output(out_dir: Path) -> tuple[Path, ...]:
     if not out_dir.is_dir():
         return ()
     return tuple(sorted(p for p in out_dir.iterdir() if _is_previous_output(p)))
+
+
+def has_ingested_sources(source_dir: Path) -> bool:
+    """True when ``source_dir`` holds files an earlier ingest wrote (``read_sources`` can read)."""
+    return bool(_previous_output(source_dir))
 
 
 def check_out_dir(out_dir: Path, *, overwrite: bool) -> tuple[Path, ...]:
