@@ -278,3 +278,31 @@ def test_config_failure_is_delivered() -> None:
     assert "Config error: NM_TIMEZONE" in _body(message)
     failed = config_failure(FakeMailbox(fail=OSError("down")), NOW, ZoneInfo("UTC"), "x")
     assert failed.delivery_error == "OSError: down"
+
+
+def test_overwrite_never_delivers_an_earlier_draft_as_fresh(tmp_path: Path) -> None:
+    """--overwrite: today's old files exist, the new run writes none (no links this time)."""
+    for name, text in (("2026-11-06.md", "# Old\n"), ("2026-11-06.notes.md", "old notes")):
+        (tmp_path / name).write_text(text)
+    client, mailbox = FakeSubstack(), FakeMailbox()
+    issue = _issue(0, draft=False, extras=False, output="No links found; nothing to draft.")
+    settings = _settings(SubstackSettings(PUB, cookies="c"))
+    deps = WeeklyDeps(issue, mailbox, lambda s: client)
+    report = run_weekly(tmp_path, NOW, settings, deps, overwrite=True)
+    assert report.status == "no_links" and report.draft_path is None
+    assert "# Old" not in _body(mailbox.message()) and not _files(mailbox.message())
+    assert client.calls == []
+
+
+def test_only_files_this_run_wrote_are_attached(tmp_path: Path) -> None:
+    (tmp_path / "2026-11-06.notes.md").write_text("old notes")
+    mailbox = FakeMailbox()
+    run_weekly(tmp_path, NOW, _settings(), WeeklyDeps(_issue(0, extras=False), mailbox))
+    assert set(_files(mailbox.message())) == {"2026-11-06.md"}
+
+
+def test_substack_skips_a_draft_kept_after_a_failure(tmp_path: Path) -> None:
+    client = FakeSubstack()
+    deps = WeeklyDeps(_issue(1), FakeMailbox(), lambda s: client)
+    report = run_weekly(tmp_path, NOW, _settings(SubstackSettings(PUB, cookies="c")), deps)
+    assert report.status == "drafted" and client.calls == []

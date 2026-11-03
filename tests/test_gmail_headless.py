@@ -193,3 +193,30 @@ def test_client_profile_address_and_insert_message() -> None:
     assert call["body"]["labelIds"] == ["INBOX", "UNREAD"]
     decoded = email.message_from_bytes(base64.urlsafe_b64decode(call["body"]["raw"]))
     assert decoded["Subject"] == "hi"
+
+
+def test_reconsent_keeps_the_insert_scope_the_cached_token_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A revoked read+insert token re-consented by `ingest` must not lose gmail.insert."""
+    settings = _settings(tmp_path)
+    settings.gmail_client_secrets.write_text("{}")
+    settings.gmail_token.parent.mkdir()
+    settings.gmail_token.write_text("{}")
+    revoked = _Creds(DELIVERY_SCOPES, fail=gmail.RefreshError("revoked"))
+    revoked.expired = True
+    monkeypatch.setattr(gmail.Credentials, "from_authorized_user_file", lambda path, s: revoked)
+    asked: list[tuple[str, ...]] = []
+
+    class _Flow:
+        def run_local_server(self, port: int) -> _Creds:
+            return _Creds(DELIVERY_SCOPES)
+
+    def _flow(path: str, scopes: list[str]) -> _Flow:
+        asked.append(tuple(scopes))
+        return _Flow()
+
+    monkeypatch.setattr(gmail.InstalledAppFlow, "from_client_secrets_file", _flow)
+    monkeypatch.setattr(gmail, "build", lambda *a, **k: _Service())
+    build_gmail_client(settings, READ_SCOPES)
+    assert asked == [DELIVERY_SCOPES]

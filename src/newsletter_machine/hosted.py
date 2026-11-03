@@ -2,9 +2,9 @@
 
 The root ``agent.py`` gives a small runner model this tool; the schedule's prompt asks it to
 call the tool once. The tool runs ``newsletter-machine weekly`` in-process (temporary folder,
-inbox delivery). Once a run has reached the inbox, a second call for the same issue date
-returns the first answer instead of paying for another issue; a call while a run is in
-progress is refused.
+inbox delivery). Once the issue run has started (so models may have been paid for), a second
+call for the same issue date returns the first answer instead of paying again; a setup
+failure (bad token, Gmail down) can be retried, and a call during a run is refused.
 """
 
 import logging
@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from langchain_core.tools import tool
 
+from newsletter_machine.cli_common import EXIT_ERROR
 from newsletter_machine.cli_weekly import ScheduledOutcome, run_scheduled
 from newsletter_machine.config import ConfigError, load_runner_model, load_weekly_settings
 from newsletter_machine.weekly import issue_date
@@ -33,6 +34,13 @@ class OncePerDay:
         self._lock = threading.Lock()
         self._done: dict[date, str] = {}
 
+    def _safe_run(self) -> ScheduledOutcome:
+        try:
+            return self._run()
+        except Exception as exc:  # never let a bug invite a second paid run
+            logger.exception("The weekly run crashed")
+            return ScheduledOutcome(EXIT_ERROR, f"The weekly run crashed: {exc}", started=True)
+
     def __call__(self) -> str:
         if not self._lock.acquire(blocking=False):
             return "A weekly run is already in progress; not starting another."
@@ -40,9 +48,9 @@ class OncePerDay:
             day = self._today()
             if day in self._done:
                 return f"Already ran for {day}: {self._done[day]}"
-            outcome = self._run()
+            outcome = self._safe_run()
             answer = _answer(outcome)
-            if outcome.delivered:  # undelivered (config error, Gmail down): allow a retry
+            if outcome.started:  # a paid-for run counts; a setup failure may be retried
                 self._done = {**self._done, day: answer}
             return answer
         finally:

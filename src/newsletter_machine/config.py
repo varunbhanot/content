@@ -186,10 +186,11 @@ def load_runner_model(env: Mapping[str, str] | None = None) -> str:
     """The hosted runner's model: ``NM_RUNNER_MODEL``, else ``NM_FAST_MODEL`` (it only calls
     one tool)."""
     env = _load_env(env)
+    runner = env.get("NM_RUNNER_MODEL", "").strip()
+    if runner:
+        return _require_provider_prefix("NM_RUNNER_MODEL", runner)
     fast = env.get("NM_FAST_MODEL", "").strip() or DEFAULT_FAST_MODEL
-    return _require_provider_prefix(
-        "NM_RUNNER_MODEL", env.get("NM_RUNNER_MODEL", "").strip() or fast
-    )
+    return _require_provider_prefix("NM_FAST_MODEL", fast)
 
 
 def _positive_float(name: str, value: str) -> float:

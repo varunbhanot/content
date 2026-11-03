@@ -157,7 +157,7 @@ def test_run_scheduled_reports_delivery_failure(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(seen["mailbox"], "insert_message", _refuse)
     outcome = cli_weekly.run_scheduled(None, datetime(2026, 11, 6, 2, tzinfo=UTC))
-    assert outcome.exit_code == 1 and not outcome.delivered
+    assert outcome.exit_code == 1 and outcome.started
     assert "Could not deliver" in outcome.summary and "OSError: 403" in outcome.summary
     kept = seen["out"]  # the paid-for draft survives a failed delivery
     assert f"The draft is kept at {kept}." in outcome.summary
@@ -201,3 +201,21 @@ def test_weekly_bad_token_setting_exits_2_before_gmail(
     assert main(["weekly"]) == 2
     assert "scopes" not in seen
     assert "NM_GMAIL_TOKEN_B64" in capsys.readouterr().err
+
+
+def test_weekly_unusable_out_dir_is_a_config_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen = _wire(monkeypatch)
+    blocker = tmp_path / "drafts"
+    blocker.write_text("a file, not a folder")
+    assert main(["weekly", "--out-dir", str(blocker)]) == 2
+    assert "scopes" not in seen and "Config error" in capsys.readouterr().err
+
+
+def test_summary_is_one_line_with_the_substack_link() -> None:
+    from newsletter_machine.weekly import WeeklyReport
+
+    report = WeeklyReport("drafted", 0, "s", "m-1", substack_line="Substack draft (unpublished): u")
+    assert "\n" not in cli_weekly._summary(report)
+    assert cli_weekly._summary(report).endswith("Substack draft (unpublished): u")

@@ -54,8 +54,8 @@ def add_weekly_parsers(sub: Any) -> None:
 @dataclass(frozen=True)
 class ScheduledOutcome:
     exit_code: int
-    summary: str
-    delivered: bool = False  # a message reached the inbox
+    summary: str  # one line
+    started: bool = False  # the issue run began (models may have been paid for)
 
 
 def _summary(report: WeeklyReport) -> str:
@@ -65,11 +65,11 @@ def _summary(report: WeeklyReport) -> str:
             line += f" The draft is kept at {report.draft_path}."
     else:
         line = f"Delivered {report.subject!r} to your inbox (message {report.message_id})."
-    return f"{line}\n{report.substack_line}" if report.substack_line else line
+    return f"{line} {report.substack_line}" if report.substack_line else line
 
 
-def _outcome(report: WeeklyReport) -> ScheduledOutcome:
-    return ScheduledOutcome(weekly_exit_code(report), _summary(report), not report.delivery_error)
+def _outcome(report: WeeklyReport, *, started: bool = True) -> ScheduledOutcome:
+    return ScheduledOutcome(weekly_exit_code(report), _summary(report), started)
 
 
 def _run_in(
@@ -77,8 +77,7 @@ def _run_in(
 ) -> WeeklyReport:
     """Run in ``out_dir``, or in a temporary folder that is removed unless delivery failed
     (then the paid-for draft stays where the summary says)."""
-    if out_dir is not None:
-        out_dir.mkdir(parents=True, exist_ok=True)
+    if out_dir is not None:  # created by run_scheduled's checks
         return run_weekly(out_dir, now, weekly, deps, overwrite=overwrite)
     where = Path(tempfile.mkdtemp(prefix=TEMP_PREFIX))
     report: WeeklyReport | None = None
@@ -98,6 +97,8 @@ def run_scheduled(
     try:
         ingest = load_ingest_settings()
         configure_logging()
+        if out_dir is not None:
+            out_dir.mkdir(parents=True, exist_ok=True)
     except (ConfigError, ValueError, OSError) as exc:
         return ScheduledOutcome(EXIT_CONFIG, f"Config error: {exc}")
     try:
@@ -110,7 +111,8 @@ def run_scheduled(
     try:
         weekly = load_weekly_settings()
     except ConfigError as exc:  # Gmail works, so say so in the inbox too
-        return _outcome(config_failure(mailbox, now, UTC_ZONE, f"Config error: {exc}"))
+        report = config_failure(mailbox, now, UTC_ZONE, f"Config error: {exc}")
+        return _outcome(report, started=False)
     deps = WeeklyDeps(run_issue=run_issue, mailbox=mailbox)
     return _outcome(_run_in(out_dir, now, weekly, deps, overwrite))
 

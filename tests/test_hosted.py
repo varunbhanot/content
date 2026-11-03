@@ -20,6 +20,8 @@ def test_runner_model_defaults_to_the_fast_model_and_is_configurable() -> None:
     )
     with pytest.raises(ConfigError, match="NM_RUNNER_MODEL"):
         load_runner_model({"NM_RUNNER_MODEL": "no-provider"})
+    with pytest.raises(ConfigError, match="NM_FAST_MODEL"):
+        load_runner_model({"NM_FAST_MODEL": "no-provider"})
 
 
 def test_runner_model_reads_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -33,7 +35,7 @@ def test_once_per_day_runs_once_and_repeats_the_first_answer() -> None:
 
     def _run() -> ScheduledOutcome:
         calls.append(1)
-        return ScheduledOutcome(0, "Delivered 'x'.", delivered=True)
+        return ScheduledOutcome(0, "Delivered 'x'.", started=True)
 
     once = OncePerDay(_run, lambda: DAY)
     assert once() == "OK: Delivered 'x'."
@@ -43,24 +45,37 @@ def test_once_per_day_runs_once_and_repeats_the_first_answer() -> None:
 
 def test_once_per_day_runs_again_on_a_new_day() -> None:
     days = iter([DAY, date(2026, 11, 13)])
-    once = OncePerDay(lambda: ScheduledOutcome(1, "failed", delivered=True), lambda: next(days))
+    once = OncePerDay(lambda: ScheduledOutcome(1, "failed", started=True), lambda: next(days))
     assert once() == "Exit 1: failed"
     assert once() == "Exit 1: failed"
 
 
-def test_undelivered_results_are_not_cached_so_a_fix_can_retry() -> None:
+def test_setup_failures_are_not_cached_so_a_fix_can_retry() -> None:
     outcomes = iter(
         [
             ScheduledOutcome(2, "Config error: x"),
-            ScheduledOutcome(1, "Could not deliver"),
-            ScheduledOutcome(0, "Delivered.", delivered=True),
+            ScheduledOutcome(1, "Gmail failed: timeout"),
+            ScheduledOutcome(1, "Could not deliver", started=True),
         ]
     )
     once = OncePerDay(lambda: next(outcomes), lambda: DAY)
     assert once() == "Exit 2: Config error: x"
+    assert once() == "Exit 1: Gmail failed: timeout"
     assert once() == "Exit 1: Could not deliver"
-    assert once() == "OK: Delivered."
-    assert once() == "Already ran for 2026-11-06: OK: Delivered."
+    assert once() == "Already ran for 2026-11-06: Exit 1: Could not deliver"
+
+
+def test_a_crash_is_reported_and_counts_as_a_run() -> None:
+    calls: list[int] = []
+
+    def _boom() -> ScheduledOutcome:
+        calls.append(1)
+        raise RuntimeError("bug")
+
+    once = OncePerDay(_boom, lambda: DAY)
+    assert once() == "Exit 1: The weekly run crashed: bug"
+    assert once().startswith("Already ran for 2026-11-06")
+    assert len(calls) == 1
 
 
 def test_concurrent_call_is_refused() -> None:
@@ -69,7 +84,7 @@ def test_concurrent_call_is_refused() -> None:
     def _slow() -> ScheduledOutcome:
         started.set()
         release.wait(5)
-        return ScheduledOutcome(0, "done", delivered=True)
+        return ScheduledOutcome(0, "done", started=True)
 
     once = OncePerDay(_slow, lambda: DAY)
     results: list[str] = []

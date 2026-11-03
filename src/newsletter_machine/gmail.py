@@ -225,13 +225,19 @@ def _save_token(path: Path, creds: Any) -> None:
     path.chmod(TOKEN_FILE_MODE)
 
 
-def _cached_credentials(settings: IngestSettings, scopes: Sequence[str]) -> Any | None:
+def _load_cached(settings: IngestSettings) -> Any | None:
     if not settings.gmail_token.exists():
         return None
-    creds = Credentials.from_authorized_user_file(  # type: ignore[no-untyped-call]
+    return Credentials.from_authorized_user_file(  # type: ignore[no-untyped-call]
         str(settings.gmail_token),
         None,  # None: keep the scopes the token was granted
     )
+
+
+def _usable(creds: Any | None, scopes: Sequence[str]) -> Any | None:
+    """The cached credentials when they cover ``scopes`` and are (or can be made) valid."""
+    if creds is None:
+        return None
     if not creds.has_scopes(list(scopes)):
         logger.warning("Cached Gmail token lacks a needed permission; asking for consent again")
         return None
@@ -244,6 +250,12 @@ def _cached_credentials(settings: IngestSettings, scopes: Sequence[str]) -> Any 
         except RefreshError:
             logger.warning("Cached Gmail token could not be refreshed; asking for consent again")
     return None
+
+
+def _wanted(scopes: Sequence[str], cached: Any | None) -> tuple[str, ...]:
+    """``scopes`` plus any the cached token held, so re-consent never drops ``gmail.insert``."""
+    held = tuple(getattr(cached, "scopes", None) or ())
+    return tuple(dict.fromkeys((*scopes, *held)))
 
 
 def _headless_credentials(info: Mapping[str, Any], scopes: Sequence[str]) -> Any:
@@ -301,8 +313,9 @@ def build_gmail_client(
     if settings.gmail_token_info is not None:
         return _service(_headless_credentials(settings.gmail_token_info, scopes))
     _require_client_file(settings)
-    creds = _cached_credentials(settings, scopes)
+    cached = _load_cached(settings)
+    creds = _usable(cached, scopes)
     if creds is None:
-        creds = _consent(settings, scopes)
+        creds = _consent(settings, _wanted(scopes, cached))
     _save_token(settings.gmail_token, creds)
     return _service(creds)

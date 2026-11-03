@@ -74,6 +74,7 @@ class _IssueRun:
     code: int
     log: str
     draft: str | None  # only a draft written by this run
+    written: tuple[Path, ...] = ()  # draft, critique and notes files this run wrote
 
 
 def issue_date(now: datetime, timezone: ZoneInfo) -> date:
@@ -142,10 +143,28 @@ def _read(path: Path) -> str | None:
         return None
 
 
+def _snapshot(path: Path) -> tuple[int, int, int] | None:
+    """Identity of a file as it is now (atomic writes replace it), None when missing."""
+    try:
+        info = path.stat()
+    except OSError:
+        return None
+    return info.st_ino, info.st_mtime_ns, info.st_size
+
+
+def _fresh(path: Path, before: tuple[int, int, int] | None) -> bool:
+    """True when this run wrote ``path`` (an earlier run's file under --overwrite is not)."""
+    now = _snapshot(path)
+    return now is not None and now != before
+
+
 def _run_issue(run: IssueRunner, paths: IssuePaths, overwrite: bool) -> _IssueRun:
+    files = (paths.draft, paths.critique, paths.notes)
+    before = {path: _snapshot(path) for path in files}
     code, log = _captured(run, issue_args(paths.draft, overwrite=overwrite))
-    wrote = code != EXIT_CONFIG and paths.draft.is_file()  # exit 2 writes nothing
-    return _IssueRun(code, log, _read(paths.draft) if wrote else None)
+    written = tuple(path for path in files if _fresh(path, before[path]))
+    draft = _read(paths.draft) if paths.draft in written else None
+    return _IssueRun(code, log, draft, written)
 
 
 def _status(run: _IssueRun) -> Status:
@@ -163,8 +182,10 @@ def _subject(status: Status, run: _IssueRun, day: date) -> str:
     return f"Newsletter draft{problems}: {split_title(run.draft)[0]} ({day})"
 
 
-def _substack_line(deps: WeeklyDeps, settings: WeeklySettings, draft: str | None) -> str:
-    if settings.substack is None or draft is None:
+def _substack_line(deps: WeeklyDeps, settings: WeeklySettings, run: _IssueRun) -> str:
+    """Only a clean run (exit 0 with a fresh draft) goes to Substack."""
+    draft = run.draft
+    if settings.substack is None or draft is None or run.code != 0:
         return ""
     try:
         client = deps.make_substack(settings.substack)
@@ -189,10 +210,10 @@ def _body(run: _IssueRun, substack_line: str) -> str:
     return "\n\n".join(parts) + "\n"
 
 
-def _attachments(paths: IssuePaths, run: _IssueRun) -> tuple[tuple[str, str], ...]:
+def _attachments(run: _IssueRun) -> tuple[tuple[str, str], ...]:
     if run.draft is None:
         return ()
-    texts = ((p.name, _read(p)) for p in (paths.draft, paths.critique, paths.notes) if p.is_file())
+    texts = ((path.name, _read(path)) for path in run.written)
     return tuple((name, text) for name, text in texts if text is not None)
 
 
@@ -209,9 +230,9 @@ def run_weekly(
     paths = issue_paths(out_dir / f"{day.isoformat()}.md")
     run = _run_issue(deps.run_issue, paths, overwrite)
     status = _status(run)
-    substack_line = _substack_line(deps, settings, run.draft)
+    substack_line = _substack_line(deps, settings, run)
     subject = _subject(status, run, day)
-    delivery = Delivery(subject, _body(run, substack_line), _attachments(paths, run))
+    delivery = Delivery(subject, _body(run, substack_line), _attachments(run))
     draft_path = paths.draft if run.draft is not None else None
     report = WeeklyReport(status, run.code, subject, "", "", substack_line, draft_path)
     try:
