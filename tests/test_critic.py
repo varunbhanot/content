@@ -153,3 +153,30 @@ def test_verdict_for_mechanical_item_is_dropped_without_warning(
     assert critique.results[1].checked_by == "code"
     assert critique.results[1].status == "pass"
     assert "unknown" not in caplog.text
+
+
+class _NoToolChoiceModel(GenericFakeChatModel):
+    """Like Sonnet 5.5: native structured output, but forced ``tool_choice`` is rejected."""
+
+    bound: list[dict[str, Any]] = []
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> "_NoToolChoiceModel":
+        if kwargs.get("tool_choice") in ("any", "tool") or isinstance(
+            kwargs.get("tool_choice"), dict
+        ):
+            raise AssertionError(f"forced tool_choice sent: {kwargs['tool_choice']!r}")
+        self.bound.append(kwargs)
+        return self
+
+
+def test_critic_uses_native_structured_output_when_model_rejects_forced_tools() -> None:
+    reply = '{"verdicts": [{"item_id": "opening", "passed": true}], "summary": "Sounds like him."}'
+    model = _NoToolChoiceModel(
+        messages=iter([AIMessage(content=reply)]),
+        bound=[],
+        profile={"structured_output": True, "tool_choice": False},
+    )
+    critic = build_critic(model, "system")
+    critique = run_critic(critic, "task", CHECKLIST, "Fine.")
+    assert critique.summary == "Sounds like him."
+    assert "response_format" in model.bound[0]

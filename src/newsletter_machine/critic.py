@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from deepagents import CompiledSubAgent
 from langchain.agents import create_agent
-from langchain.agents.structured_output import ToolStrategy
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
 
@@ -86,12 +85,17 @@ def critic_task(draft: str, docs: Iterable[SourceDoc]) -> str:
 
 
 def build_critic(model: BaseChatModel, system_prompt: str) -> CompiledSubAgent:
-    """A tool-less agent with structured output; a deep agent's ``task`` returns it as JSON."""
+    """A tool-less agent with structured output; a deep agent's ``task`` returns it as JSON.
+
+    Passing the bare schema lets LangChain pick the strategy per model: native structured
+    output where the model supports it (newer Claude models reject the forced ``tool_choice``
+    a tool strategy needs), a structured-output tool otherwise.
+    """
     runnable = create_agent(
         model,
         tools=[],
         system_prompt=system_prompt,
-        response_format=ToolStrategy(CriticOutput),
+        response_format=CriticOutput,
         name=CRITIC_NAME,
     )
     return CompiledSubAgent(name=CRITIC_NAME, description=CRITIC_DESCRIPTION, runnable=runnable)
