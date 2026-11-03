@@ -10,6 +10,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -23,6 +24,7 @@ DEFAULT_FAST_MODEL = "anthropic:claude-haiku-5-5"
 DEFAULT_VOICE_DIR = "voice"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]  # the repo (editable install, hosted image)
 DEFAULT_TIMEZONE = "Asia/Kolkata"
+FALLBACK_TIMEZONE = ZoneInfo("UTC")
 TOKEN_INFO_KEYS = ("refresh_token", "client_id", "client_secret")
 TRUE_WORDS = frozenset({"1", "true", "yes", "on"})
 FALSE_WORDS = frozenset({"", "0", "false", "no", "off"})
@@ -251,7 +253,7 @@ def load_ingest_settings(
     )
 
 
-def _token_info(value: str) -> dict[str, Any] | None:
+def _token_info(value: str) -> Mapping[str, Any] | None:
     """Decode ``NM_GMAIL_TOKEN_B64``; errors name the variable, never its value."""
     value = value.strip()
     if not value:
@@ -268,7 +270,7 @@ def _token_info(value: str) -> dict[str, Any] | None:
     ]
     if missing:
         raise ConfigError(f"{hint}; it lacks {', '.join(missing)}.")
-    return info
+    return MappingProxyType(info)
 
 
 def _flag(name: str, value: str) -> bool:
@@ -308,6 +310,15 @@ def _substack(env: Mapping[str, str]) -> SubstackSettings | None:
             "SUBSTACK_PASSWORD."
         )
     return SubstackSettings(url, cookies=cookies, email=email, password=password)
+
+
+def issue_timezone(env: Mapping[str, str] | None = None) -> ZoneInfo:
+    """``NM_TIMEZONE`` for dating an issue, or UTC when it is invalid (the error itself is
+    reported by ``load_weekly_settings``)."""
+    try:
+        return _timezone(_load_env(env).get("NM_TIMEZONE", DEFAULT_TIMEZONE))
+    except ConfigError:
+        return FALLBACK_TIMEZONE
 
 
 def load_weekly_settings(env: Mapping[str, str] | None = None) -> WeeklySettings:

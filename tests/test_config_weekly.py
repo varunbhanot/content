@@ -151,3 +151,15 @@ def test_relative_voice_dir_missing_from_cwd_falls_back_to_the_project(
 def test_absolute_voice_dir_never_falls_back(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="Voice corpus not found"):
         load_settings({"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(tmp_path / "none")})
+
+
+def test_gmail_token_info_is_read_only() -> None:
+    info = load_ingest_settings({"NM_GMAIL_TOKEN_B64": _b64(TOKEN)}).gmail_token_info
+    assert info is not None
+    with pytest.raises(TypeError):
+        info["token"] = "x"  # type: ignore[index]
+
+
+def test_issue_timezone_falls_back_to_utc() -> None:
+    assert config.issue_timezone({"NM_TIMEZONE": "Europe/Paris"}) == ZoneInfo("Europe/Paris")
+    assert config.issue_timezone({"NM_TIMEZONE": "Nowhere/Land"}) == ZoneInfo("UTC")

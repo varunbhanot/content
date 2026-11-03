@@ -13,13 +13,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from newsletter_machine.cli_common import EXIT_CONFIG, EXIT_ERROR, configure_logging
 from newsletter_machine.cli_issue import run_issue
 from newsletter_machine.config import (
     ConfigError,
     WeeklySettings,
+    issue_timezone,
     load_ingest_settings,
     load_weekly_settings,
 )
@@ -35,7 +35,6 @@ from newsletter_machine.weekly import (
 logger = logging.getLogger(__name__)
 
 TEMP_PREFIX = "newsletter-weekly-"
-UTC_ZONE = ZoneInfo("UTC")
 
 
 def add_weekly_parsers(sub: Any) -> None:
@@ -55,7 +54,7 @@ def add_weekly_parsers(sub: Any) -> None:
 class ScheduledOutcome:
     exit_code: int
     summary: str  # one line
-    started: bool = False  # the issue run began (models may have been paid for)
+    started: bool = False  # counts as the day's run (see _outcome)
 
 
 def _summary(report: WeeklyReport) -> str:
@@ -68,8 +67,11 @@ def _summary(report: WeeklyReport) -> str:
     return f"{line} {report.substack_line}" if report.substack_line else line
 
 
-def _outcome(report: WeeklyReport, *, started: bool = True) -> ScheduledOutcome:
-    return ScheduledOutcome(weekly_exit_code(report), _summary(report), started)
+def _outcome(report: WeeklyReport) -> ScheduledOutcome:
+    """A run counts for the day when a model may have been paid for or Varun was told;
+    an undelivered setup failure (exit 2) can be retried once fixed."""
+    counts = report.exit_code != EXIT_CONFIG or bool(report.message_id)
+    return ScheduledOutcome(weekly_exit_code(report), _summary(report), counts)
 
 
 def _run_in(
@@ -111,13 +113,15 @@ def run_scheduled(
     try:
         weekly = load_weekly_settings()
     except ConfigError as exc:  # Gmail works, so say so in the inbox too
-        report = config_failure(mailbox, now, UTC_ZONE, f"Config error: {exc}")
-        return _outcome(report, started=False)
+        return _outcome(config_failure(mailbox, now, issue_timezone(), f"Config error: {exc}"))
     deps = WeeklyDeps(run_issue=run_issue, mailbox=mailbox)
     return _outcome(_run_in(out_dir, now, weekly, deps, overwrite))
 
 
 def run_weekly_command(args: argparse.Namespace) -> int:
+    if args.overwrite and args.out_dir is None:
+        print("Config error: --overwrite only applies with --out-dir.", file=sys.stderr)
+        return EXIT_CONFIG
     outcome = run_scheduled(args.out_dir, overwrite=args.overwrite)
     print(outcome.summary, file=sys.stderr if outcome.exit_code else sys.stdout)
     return outcome.exit_code
@@ -128,10 +132,10 @@ def run_gmail_auth(args: argparse.Namespace) -> int:
         settings = load_ingest_settings(ignore_token=True)
         configure_logging()
         path = authorize(settings, DELIVERY_SCOPES)
-    except (ConfigError, ValueError, OSError) as exc:
+    except (ConfigError, ValueError) as exc:
         print(f"Config error: {exc}", file=sys.stderr)
         return EXIT_CONFIG
-    except Exception as exc:  # OAuth flow failures surface as many types
+    except Exception as exc:  # OAuth flow, socket and file failures surface as many types
         logger.debug("Gmail consent failed", exc_info=True)
         print(f"Gmail consent failed: {exc}", file=sys.stderr)
         return EXIT_ERROR

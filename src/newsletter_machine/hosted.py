@@ -11,13 +11,12 @@ import logging
 import threading
 from collections.abc import Callable
 from datetime import UTC, date, datetime
-from zoneinfo import ZoneInfo
 
 from langchain_core.tools import tool
 
 from newsletter_machine.cli_common import EXIT_ERROR
 from newsletter_machine.cli_weekly import ScheduledOutcome, run_scheduled
-from newsletter_machine.config import ConfigError, load_runner_model, load_weekly_settings
+from newsletter_machine.config import issue_timezone, load_runner_model
 from newsletter_machine.weekly import issue_date
 
 logger = logging.getLogger(__name__)
@@ -68,11 +67,7 @@ def scheduled_once() -> ScheduledOutcome:
 
 def _issue_today() -> date:
     """Today as the issue date sees it (``NM_TIMEZONE``; UTC when that is invalid)."""
-    try:
-        zone = load_weekly_settings().timezone
-    except ConfigError:
-        zone = ZoneInfo("UTC")
-    return issue_date(datetime.now(UTC), zone)
+    return issue_date(datetime.now(UTC), issue_timezone())
 
 
 _RUNNER = OncePerDay(scheduled_once, _issue_today)

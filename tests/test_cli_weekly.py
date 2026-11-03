@@ -219,3 +219,43 @@ def test_summary_is_one_line_with_the_substack_link() -> None:
     report = WeeklyReport("drafted", 0, "s", "m-1", substack_line="Substack draft (unpublished): u")
     assert "\n" not in cli_weekly._summary(report)
     assert cli_weekly._summary(report).endswith("Substack draft (unpublished): u")
+
+
+def test_overwrite_without_out_dir_is_a_usage_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _wire(monkeypatch)
+    assert main(["weekly", "--overwrite"]) == 2
+    assert "scopes" not in seen
+
+
+def test_issue_config_error_does_not_count_unless_varun_was_told(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _wire(monkeypatch)
+    monkeypatch.setattr(cli_weekly, "run_issue", lambda args: 2)
+    told = cli_weekly.run_scheduled(None)
+    assert told.exit_code == 2 and told.started  # the failure email reached the inbox
+
+    def _refuse(raw: bytes, label_ids: Sequence[str]) -> str:
+        raise OSError("down")
+
+    monkeypatch.setattr(seen["mailbox"], "insert_message", _refuse)
+    untold = cli_weekly.run_scheduled(None)
+    assert untold.exit_code == 2 and not untold.started
+
+
+def test_bad_substack_setting_is_dated_in_the_issue_zone(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _wire(monkeypatch)
+    monkeypatch.setenv("NM_TIMEZONE", "Pacific/Kiritimati")
+    monkeypatch.setenv("NM_SUBSTACK_DRAFT", "true")
+    outcome = cli_weekly.run_scheduled(None, datetime(2026, 11, 5, 12, tzinfo=UTC))
+    assert outcome.exit_code == 2
+    subject = message_from_bytes(seen["mailbox"].raw[0])["Subject"]
+    assert subject == "Newsletter run failed (2026-11-06)"  # UTC+14, not the UTC date
+
+
+def test_gmail_auth_socket_failure_is_a_runtime_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _authorize(settings: Any, scopes: Sequence[str]) -> Path:
+        raise OSError("cannot bind a local port")
+
+    monkeypatch.setattr(cli_weekly, "authorize", _authorize)
+    assert main(["gmail-auth"]) == 1
