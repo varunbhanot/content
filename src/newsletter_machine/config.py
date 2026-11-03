@@ -21,6 +21,8 @@ DEFAULT_GMAIL_TOKEN = ".secrets/gmail-token.json"
 DEFAULT_FETCH_TIMEOUT = "20"
 DEFAULT_TRANSCRIPT_LANGUAGES = "en"
 DEFAULT_GMAIL_ALLOWED_SENDERS = "me"
+DEFAULT_MAX_REVISIONS = 1
+MAX_REVISIONS_LIMIT = 3  # each revision is a writer + critic call; caps cost per issue
 SENDER_PATTERN = re.compile(r"[^\s{}()\"]+")
 
 
@@ -35,6 +37,14 @@ class Settings:
     fast_model: str
     voice_dir: Path
     critic_model: str
+
+
+@dataclass(frozen=True)
+class EditorSettings:
+    """Settings only ``issue`` reads, so a bad value never breaks ``hello`` or ``draft``."""
+
+    editor_model: str
+    max_revisions: int
 
 
 @dataclass(frozen=True)
@@ -69,6 +79,18 @@ def _require_provider_prefix(name: str, value: str) -> str:
     return value
 
 
+def _max_revisions(value: str) -> int:
+    value = value.strip()
+    if not value:
+        return DEFAULT_MAX_REVISIONS
+    if not (value.isascii() and value.isdigit()) or int(value) > MAX_REVISIONS_LIMIT:
+        raise ConfigError(
+            f"NM_MAX_REVISIONS must be a whole number from 0 to {MAX_REVISIONS_LIMIT} "
+            f"(got {value!r})."
+        )
+    return int(value)
+
+
 def load_settings(
     env: Mapping[str, str] | None = None, *, repo_root: Path | None = None
 ) -> Settings:
@@ -100,6 +122,19 @@ def load_settings(
         fast_model=fast_model,
         voice_dir=voice_dir,
         critic_model=critic_model,
+    )
+
+
+def load_editor_settings(
+    settings: Settings, env: Mapping[str, str] | None = None
+) -> EditorSettings:
+    """``NM_EDITOR_MODEL`` (blank = the writer model) and ``NM_MAX_REVISIONS`` (0 to 3)."""
+    env = _load_env(env)
+    editor_model = _require_provider_prefix(
+        "NM_EDITOR_MODEL", env.get("NM_EDITOR_MODEL", "").strip() or settings.writer_model
+    )
+    return EditorSettings(
+        editor_model=editor_model, max_revisions=_max_revisions(env.get("NM_MAX_REVISIONS", ""))
     )
 
 

@@ -22,7 +22,9 @@ WRITER_DESCRIPTION = (
     "(inside <source> tags) and Varun's angle; it returns the Markdown draft with a Sources list."
 )
 MAX_SOURCE_CHARS = 24_000  # ~6k tokens per source keeps a week's run within the cost budget
-WRAPPER_TAG = re.compile(r"<(\s*/?\s*(?:source|draft)\b)", re.IGNORECASE)
+WRAPPER_TAG = re.compile(
+    r"<(\s*/?\s*(?:source|draft|brief|research_notes|critique)\b)", re.IGNORECASE
+)
 WRAPPING_FENCE = re.compile(r"(?:^|\n)(```|~~~)[\w-]*[ \t]*\n(.*)\n\1\s*\Z", re.DOTALL)
 TITLE_LINE = re.compile(r"^# ", re.MULTILINE)
 
@@ -66,12 +68,22 @@ def _attrs(doc: SourceDoc, index: int) -> str:
     return " ".join(f'{key}="{html.escape(value)}"' for key, value in pairs.items() if value)
 
 
+def format_source(doc: SourceDoc, index: int) -> str:
+    """One source wrapped in a ``<source>`` tag; its text is untrusted data."""
+    return f"<source {_attrs(doc, index)}>\n{_source_text(doc)}\n</source>"
+
+
 def format_sources(docs: Iterable[SourceDoc]) -> str:
     """Usable sources wrapped in ``<source>`` tags; their text is untrusted data."""
     return "\n\n".join(
-        f"<source {_attrs(doc, index)}>\n{_source_text(doc)}\n</source>"
-        for index, doc in enumerate(usable_sources(docs), start=1)
+        format_source(doc, index) for index, doc in enumerate(usable_sources(docs), start=1)
     )
+
+
+def angle_line(angle: str | None) -> str:
+    if angle and angle.strip():
+        return f"Varun's angle: {angle.strip()}"
+    return "No angle given: pick the single strongest topic the sources support."
 
 
 def writer_task(docs: Iterable[SourceDoc], angle: str | None) -> str:
@@ -79,12 +91,7 @@ def writer_task(docs: Iterable[SourceDoc], angle: str | None) -> str:
     docs = tuple(docs)
     if not usable_sources(docs):
         raise ValueError("No usable sources: every source failed to ingest.")
-    angle_line = (
-        f"Varun's angle: {angle.strip()}"
-        if angle and angle.strip()
-        else "No angle given: pick the single strongest topic the sources support."
-    )
-    return f"{angle_line}\n\nThis week's sources:\n\n{format_sources(docs)}"
+    return f"{angle_line(angle)}\n\nThis week's sources:\n\n{format_sources(docs)}"
 
 
 def build_writer(model: BaseChatModel, system_prompt: str) -> CompiledSubAgent:

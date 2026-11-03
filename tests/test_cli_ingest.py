@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from youtube_transcript_api import TranscriptsDisabled
 
-from newsletter_machine import cli, config
+from newsletter_machine import cli_common, config
 from newsletter_machine.cli import main
 from newsletter_machine.gmail import GmailError
 from newsletter_machine.sources import InboxLink
@@ -42,10 +42,12 @@ def _hermetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: False)
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(cli, "make_html_fetcher", lambda timeout: lambda url: ARTICLE_HTML)
-    monkeypatch.setattr(cli, "make_browser_fetcher", lambda timeout: _record_browser_use)
+    monkeypatch.setattr(cli_common, "make_html_fetcher", lambda timeout: lambda url: ARTICLE_HTML)
+    monkeypatch.setattr(cli_common, "make_browser_fetcher", lambda timeout: _record_browser_use)
     monkeypatch.setattr(
-        cli, "make_transcript_fetcher", lambda languages, timeout: lambda video_id: "spoken words"
+        cli_common,
+        "make_transcript_fetcher",
+        lambda languages, timeout: lambda video_id: "spoken words",
     )
 
 
@@ -68,8 +70,10 @@ def test_ingest_retries_refused_pages_with_browser_fetcher(
     def refused(url: str) -> str:
         raise BlockedError("HTTP 403")
 
-    monkeypatch.setattr(cli, "make_html_fetcher", lambda timeout: refused)
-    monkeypatch.setattr(cli, "make_browser_fetcher", lambda timeout: lambda url: ARTICLE_HTML)
+    monkeypatch.setattr(cli_common, "make_html_fetcher", lambda timeout: refused)
+    monkeypatch.setattr(
+        cli_common, "make_browser_fetcher", lambda timeout: lambda url: ARTICLE_HTML
+    )
     links = tmp_path / "links.txt"
     links.write_text("https://cf.example.com/post\n")
     assert main(["ingest", "--links-file", str(links), "--out", str(tmp_path / "out")]) == 0
@@ -95,7 +99,7 @@ def test_ingest_from_gmail_with_no_links_reports_and_exits_zero(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake = _FakeGmail()
-    monkeypatch.setattr(cli, "build_gmail_client", lambda settings: fake)
+    monkeypatch.setattr(cli_common, "build_gmail_client", lambda settings: fake)
     assert main(["ingest", "--since", "2026-10-30", "--out", str(tmp_path / "o")]) == 0
     assert fake.query == f"after:{int(datetime(2026, 10, 30, tzinfo=UTC).timestamp())} {{from:me}}"
     assert "No links found" in capsys.readouterr().out
@@ -120,10 +124,12 @@ def test_ingest_from_gmail_reports_fallback_and_failures(
     def no_transcript(video_id: str) -> str:
         raise TranscriptsDisabled(video_id)
 
-    monkeypatch.setattr(cli, "make_html_fetcher", lambda timeout: fetch)
-    monkeypatch.setattr(cli, "make_transcript_fetcher", lambda languages, timeout: no_transcript)
-    monkeypatch.setattr(cli, "build_gmail_client", lambda settings: _FakeGmail())
-    monkeypatch.setattr(cli, "read_inbox_links", lambda client, label, since, senders: links)
+    monkeypatch.setattr(cli_common, "make_html_fetcher", lambda timeout: fetch)
+    monkeypatch.setattr(
+        cli_common, "make_transcript_fetcher", lambda languages, timeout: no_transcript
+    )
+    monkeypatch.setattr(cli_common, "build_gmail_client", lambda settings: _FakeGmail())
+    monkeypatch.setattr(cli_common, "read_inbox_links", lambda client, label, since, senders: links)
     assert main(["ingest", "--out", str(tmp_path / "o")]) == 0
     out = capsys.readouterr().out
     assert "1 ok, 1 fallback, 1 failed" in out
@@ -136,7 +142,7 @@ def test_ingest_exits_1_on_gmail_error(
     def boom(settings: Any) -> Any:
         raise GmailError("label 'newsletter' not found")
 
-    monkeypatch.setattr(cli, "build_gmail_client", boom)
+    monkeypatch.setattr(cli_common, "build_gmail_client", boom)
     assert main(["ingest", "--out", str(tmp_path / "o")]) == 1
     assert "label 'newsletter' not found" in capsys.readouterr().err
 
@@ -181,7 +187,7 @@ def test_ingest_exits_2_before_fetching_when_out_dir_has_previous_output(
     def must_not_fetch(timeout: float) -> Any:
         raise AssertionError("fetched before checking --out")
 
-    monkeypatch.setattr(cli, "make_html_fetcher", must_not_fetch)
+    monkeypatch.setattr(cli_common, "make_html_fetcher", must_not_fetch)
     assert main(["ingest", "--links-file", str(links), "--out", str(out)]) == 2
     assert "--overwrite" in capsys.readouterr().err
 
@@ -205,7 +211,7 @@ def test_ingest_exits_1_when_writing_fails(
     def disk_full(*args: Any, **kwargs: Any) -> Any:
         raise OSError("No space left on device")
 
-    monkeypatch.setattr(cli, "write_sources", disk_full)
+    monkeypatch.setattr(cli_common, "write_sources", disk_full)
     assert main(["ingest", "--links-file", str(links), "--out", str(tmp_path / "o")]) == 1
     assert "No space left" in capsys.readouterr().err
 
@@ -216,7 +222,7 @@ def test_ingest_network_error_reading_inbox_exits_1_not_config(
     def reset(settings: Any) -> Any:
         raise ConnectionResetError(104, "Connection reset by peer")
 
-    monkeypatch.setattr(cli, "build_gmail_client", reset)
+    monkeypatch.setattr(cli_common, "build_gmail_client", reset)
     assert main(["ingest", "--out", str(tmp_path / "o")]) == 1
     err = capsys.readouterr().err
     assert "Connection reset" in err

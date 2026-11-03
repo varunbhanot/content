@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 
 from newsletter_machine import config
-from newsletter_machine.config import ConfigError, load_ingest_settings, load_settings
+from newsletter_machine.config import (
+    ConfigError,
+    load_editor_settings,
+    load_ingest_settings,
+    load_settings,
+)
 
 
 def test_load_settings_returns_settings_with_defaults(make_voice_dir: Callable[..., Path]) -> None:
@@ -168,3 +173,56 @@ def test_model_settings_are_stripped(make_voice_dir: Callable[..., Path]) -> Non
         "anthropic:w",
         "a:f",
     )
+
+
+def test_editor_model_defaults_to_writer_model(make_voice_dir: Callable[..., Path]) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    env = {**env, "NM_WRITER_MODEL": "anthropic:w", "NM_EDITOR_MODEL": " "}
+    assert load_editor_settings(load_settings(env), env).editor_model == "anthropic:w"
+
+
+def test_editor_model_can_be_set(make_voice_dir: Callable[..., Path]) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    env = {**env, "NM_EDITOR_MODEL": "anthropic:e"}
+    assert load_editor_settings(load_settings(env), env).editor_model == "anthropic:e"
+
+
+def test_editor_model_requires_provider_prefix(make_voice_dir: Callable[..., Path]) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    env = {**env, "NM_EDITOR_MODEL": "e"}
+    with pytest.raises(ConfigError, match="NM_EDITOR_MODEL"):
+        load_editor_settings(load_settings(env), env)
+
+
+def test_max_revisions_defaults_to_one(make_voice_dir: Callable[..., Path]) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    assert load_editor_settings(load_settings(env), env).max_revisions == 1
+
+
+@pytest.mark.parametrize(("value", "expected"), [("0", 0), (" 3 ", 3), ("", 1)])
+def test_max_revisions_accepts_zero_to_three(
+    make_voice_dir: Callable[..., Path], value: str, expected: int
+) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    env = {**env, "NM_MAX_REVISIONS": value}
+    assert load_editor_settings(load_settings(env), env).max_revisions == expected
+
+
+@pytest.mark.parametrize("value", ["4", "-1", "x", "1.5", "true", "²"])
+def test_max_revisions_rejects_out_of_range(
+    make_voice_dir: Callable[..., Path], value: str
+) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    env = {**env, "NM_MAX_REVISIONS": value}
+    with pytest.raises(ConfigError, match="NM_MAX_REVISIONS"):
+        load_editor_settings(load_settings(env), env)
+
+
+def test_issue_only_settings_do_not_break_other_commands(
+    make_voice_dir: Callable[..., Path],
+) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    bad = {**env, "NM_MAX_REVISIONS": "9", "NM_EDITOR_MODEL": "nope"}
+    settings = load_settings(bad)  # hello and draft never read them
+    with pytest.raises(ConfigError, match="NM_EDITOR_MODEL"):
+        load_editor_settings(settings, bad)

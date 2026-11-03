@@ -1,7 +1,7 @@
 """Writer then critic, once: sub-agent wiring and output files for ``newsletter-machine draft``.
 
-The lead "editor" agent that loops plan, research, draft and critique is Phase 4; it takes
-``build_subagents`` output as its ``task`` sub-agents.
+The lead "editor" agent (``editor.py``, ``newsletter-machine issue``) wraps the
+``build_subagents`` output in ``editor_subagents.py`` and loops draft and critique.
 """
 
 import os
@@ -36,13 +36,18 @@ def output_paths(out: Path) -> OutputPaths:
 
 def check_outputs(paths: OutputPaths, *, overwrite: bool) -> None:
     """Fail fast, before any model call, on a target we cannot or should not write."""
-    if not paths.draft.parent.is_dir():
-        raise FileNotFoundError(f"Output folder {paths.draft.parent} does not exist.")
     for path in (paths.draft, paths.critique):
-        if path.is_dir():
-            raise IsADirectoryError(f"{path} is a directory.")
-        if path.exists() and not overwrite:
-            raise FileExistsError(f"{path} exists; pick another --out or pass --overwrite.")
+        check_target(path, overwrite=overwrite)
+
+
+def check_target(path: Path, *, overwrite: bool) -> None:
+    """One output file: its folder exists, it is not a folder, it is new or may be replaced."""
+    if not path.parent.is_dir():
+        raise FileNotFoundError(f"Output folder {path.parent} does not exist.")
+    if path.is_dir():
+        raise IsADirectoryError(f"{path} is a directory.")
+    if path.exists() and not overwrite:
+        raise FileExistsError(f"{path} exists; pick another --out or pass --overwrite.")
 
 
 @dataclass(frozen=True)
