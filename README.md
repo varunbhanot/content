@@ -144,11 +144,14 @@ mailbox like a received one. **Nothing is ever sent** (that permission cannot se
 message never gets the ingest label, so next week's `ingest` does not read it.
 
 ```bash
-uv run newsletter-machine weekly --out-dir drafts   # local run; without --out-dir the files go to a temp folder
+uv run newsletter-machine weekly --out-dir drafts   # local run; --overwrite to redo today's files
 ```
 
+Without `--out-dir` the files go to a temporary folder that is removed after delivery (kept, and
+named in the output, if delivery fails). The run log in the message includes warnings and errors.
 Exit codes: the `issue` run's own non-zero code, else 1 if delivery failed, else 0; 2 for a
-configuration problem (token, time zone, Substack settings), always before any model call.
+configuration problem (token, time zone, Substack settings), always before any model call (a bad
+time zone or Substack setting is also reported to the inbox when Gmail works).
 
 ### Optional: Substack draft (off by default)
 

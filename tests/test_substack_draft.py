@@ -7,6 +7,7 @@ import pytest
 
 from newsletter_machine.config import SubstackSettings
 from newsletter_machine.substack_draft import (
+    SUBSTACK_TIMEOUT,
     SubstackResult,
     create_substack_draft,
     make_substack_client,
@@ -73,7 +74,9 @@ def fake_substack_module(monkeypatch: pytest.MonkeyPatch) -> type[_FakeApi]:
 
 def test_client_uses_cookies_and_never_publishes(fake_substack_module: type[_FakeApi]) -> None:
     client = make_substack_client(SubstackSettings(PUB, cookies="sid=1"))
-    assert fake_substack_module.made == [{"cookies_string": "sid=1", "publication_url": PUB}]
+    assert fake_substack_module.made == [
+        {"cookies_string": "sid=1", "publication_url": PUB, "timeout": SUBSTACK_TIMEOUT}
+    ]
     assert create_substack_draft(client, DRAFT, PUB).draft_id == "7"
     api = client._api  # type: ignore[attr-defined]
     assert api.drafts[0]["publish"] is False
@@ -83,5 +86,5 @@ def test_client_uses_cookies_and_never_publishes(fake_substack_module: type[_Fak
 def test_client_falls_back_to_email_and_password(fake_substack_module: type[_FakeApi]) -> None:
     make_substack_client(SubstackSettings(PUB, email="v@e.com", password="pw"))
     assert fake_substack_module.made == [
-        {"email": "v@e.com", "password": "pw", "publication_url": PUB}
+        {"email": "v@e.com", "password": "pw", "publication_url": PUB, "timeout": SUBSTACK_TIMEOUT}
     ]

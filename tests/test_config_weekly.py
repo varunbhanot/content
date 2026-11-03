@@ -137,3 +137,17 @@ def test_voice_dir_prefers_cwd_when_present(
     (tmp_path / "voice" / "samples" / "hand").mkdir(parents=True)
     monkeypatch.chdir(tmp_path)
     assert load_settings({"ANTHROPIC_API_KEY": "k"}).voice_dir == tmp_path / "voice"
+
+
+def test_relative_voice_dir_missing_from_cwd_falls_back_to_the_project(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``.env.example`` sets NM_VOICE_DIR=voice and MDA uploads it; hosted cwd is elsewhere."""
+    monkeypatch.chdir(tmp_path)
+    settings = load_settings({"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": "voice"})
+    assert settings.voice_dir == config.PROJECT_ROOT / "voice"
+
+
+def test_absolute_voice_dir_never_falls_back(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="Voice corpus not found"):
+        load_settings({"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(tmp_path / "none")})

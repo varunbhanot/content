@@ -1,4 +1,5 @@
 import argparse
+import logging
 import sys
 from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
@@ -14,6 +15,7 @@ from newsletter_machine.config import SubstackSettings, WeeklySettings
 from newsletter_machine.weekly import (
     MAX_LOG_CHARS,
     WeeklyDeps,
+    config_failure,
     issue_date,
     run_weekly,
     weekly_exit_code,
@@ -224,3 +226,55 @@ def test_substack_failure_is_reported_and_delivery_still_happens(tmp_path: Path)
     report = run_weekly(tmp_path, NOW, _settings(SubstackSettings(PUB, cookies="c")), deps)
     assert report.substack_line == "Substack draft failed: RuntimeError: captcha"
     assert weekly_exit_code(report) == 0 and report.message_id == "m-1"
+
+
+def test_log_records_reach_the_message(tmp_path: Path) -> None:
+    def _run(args: argparse.Namespace) -> int:
+        logging.getLogger("newsletter_machine.web").warning("fetch blocked for %s", "x.com")
+        return 1
+
+    mailbox = FakeMailbox()
+    before = list(logging.getLogger().handlers)
+    run_weekly(tmp_path, NOW, _settings(), WeeklyDeps(_run, mailbox))
+    assert "WARNING newsletter_machine.web: fetch blocked for x.com" in _body(mailbox.message())
+    assert logging.getLogger().handlers == before  # the capture handler is removed again
+
+
+def test_overwrite_is_passed_to_the_issue_run(tmp_path: Path) -> None:
+    issue = _issue(0)
+    run_weekly(tmp_path, NOW, _settings(), WeeklyDeps(issue, FakeMailbox()), overwrite=True)
+    assert issue.seen[0].overwrite is True
+
+
+def test_undecodable_and_unreadable_files_do_not_stop_delivery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _run(args: argparse.Namespace) -> int:
+        args.out.write_bytes(b"# Title\n\n\xff broken\n")
+        args.out.with_name(f"{args.out.stem}.notes.md").write_text("notes")
+        return 0
+
+    real_read = Path.read_text
+
+    def _read(self: Path, *args: Any, **kwargs: Any) -> str:
+        if self.name.endswith(".notes.md"):
+            raise PermissionError("denied")
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _read)
+    mailbox = FakeMailbox()
+    report = run_weekly(tmp_path, NOW, _settings(), WeeklyDeps(_run, mailbox))
+    assert report.status == "drafted" and report.draft_path == tmp_path / "2026-11-06.md"
+    assert set(_files(mailbox.message())) == {"2026-11-06.md"}
+    assert "� broken" in _body(mailbox.message())
+
+
+def test_config_failure_is_delivered() -> None:
+    mailbox = FakeMailbox()
+    report = config_failure(mailbox, NOW, ZoneInfo("UTC"), "Config error: NM_TIMEZONE")
+    assert report.exit_code == 2 and report.message_id == "m-1"
+    message = mailbox.message()
+    assert message["Subject"] == "Newsletter run failed (2026-11-05)"
+    assert "Config error: NM_TIMEZONE" in _body(message)
+    failed = config_failure(FakeMailbox(fail=OSError("down")), NOW, ZoneInfo("UTC"), "x")
+    assert failed.delivery_error == "OSError: down"

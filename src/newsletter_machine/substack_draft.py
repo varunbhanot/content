@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 TITLE_LINE = re.compile(r"\A\s*# (?P<title>.+?)\s*(?:\n|\Z)")
 UNTITLED = "Untitled draft"
+SUBSTACK_TIMEOUT = 60.0  # seconds per request; the client's default is to wait forever
 
 
 class SubstackClient(Protocol):
@@ -67,11 +68,16 @@ def make_substack_client(settings: SubstackSettings) -> SubstackClient:
     from substack import Api  # lazy: the unofficial client is only needed when opted in
 
     if settings.cookies:
-        api = Api(cookies_string=settings.cookies, publication_url=settings.publication_url)
+        api = Api(
+            cookies_string=settings.cookies,
+            publication_url=settings.publication_url,
+            timeout=SUBSTACK_TIMEOUT,
+        )
     else:
         api = Api(
             email=settings.email,
             password=settings.password,
             publication_url=settings.publication_url,
+            timeout=SUBSTACK_TIMEOUT,
         )
     return _ApiClient(api)

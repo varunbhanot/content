@@ -1,4 +1,5 @@
 import argparse
+import shutil
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from email import message_from_bytes
@@ -93,10 +94,46 @@ def test_weekly_config_error_exits_2_before_any_run(
     assert "Config error: token lacks gmail.insert" in capsys.readouterr().err
 
 
-def test_weekly_bad_timezone_is_a_config_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    _wire(monkeypatch)
+def test_weekly_bad_timezone_exits_2_and_tells_the_inbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _wire(monkeypatch)
     monkeypatch.setenv("NM_TIMEZONE", "Nowhere/Land")
     assert main(["weekly"]) == 2
+    assert "out" not in seen  # no issue run
+    message = message_from_bytes(seen["mailbox"].raw[0])
+    assert message["Subject"].startswith("Newsletter run failed")
+
+
+def test_weekly_overwrite_flag_reaches_the_issue_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen = _wire(monkeypatch)
+
+    def _issue(args: argparse.Namespace) -> int:
+        seen["overwrite"] = args.overwrite
+        return 0
+
+    monkeypatch.setattr(cli_weekly, "run_issue", _issue)
+    assert main(["weekly", "--out-dir", str(tmp_path), "--overwrite"]) == 0
+    assert seen["overwrite"] is True
+
+
+def test_temp_folder_is_removed_even_when_the_run_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    made: list[Path] = []
+    real = cli_weekly.tempfile.mkdtemp
+
+    def _mkdtemp(**kwargs: Any) -> str:
+        made.append(Path(real(**kwargs)))
+        return str(made[-1])
+
+    def _boom(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("bug")
+
+    _wire(monkeypatch)
+    monkeypatch.setattr(cli_weekly.tempfile, "mkdtemp", _mkdtemp)
+    monkeypatch.setattr(cli_weekly, "run_weekly", _boom)
+    with pytest.raises(RuntimeError):
+        cli_weekly.run_scheduled(None)
+    assert made and not made[0].exists()
 
 
 def test_weekly_gmail_outage_exits_1(
@@ -120,8 +157,12 @@ def test_run_scheduled_reports_delivery_failure(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(seen["mailbox"], "insert_message", _refuse)
     outcome = cli_weekly.run_scheduled(None, datetime(2026, 11, 6, 2, tzinfo=UTC))
-    assert outcome.exit_code == 1
+    assert outcome.exit_code == 1 and not outcome.delivered
     assert "Could not deliver" in outcome.summary and "OSError: 403" in outcome.summary
+    kept = seen["out"]  # the paid-for draft survives a failed delivery
+    assert f"The draft is kept at {kept}." in outcome.summary
+    assert kept.read_text() == DRAFT
+    shutil.rmtree(kept.parent)
 
 
 def test_gmail_auth_saves_token_and_ignores_a_broken_b64(
@@ -150,3 +191,13 @@ def test_gmail_auth_failures(monkeypatch: pytest.MonkeyPatch, error: Exception, 
 
     monkeypatch.setattr(cli_weekly, "authorize", _authorize)
     assert main(["gmail-auth"]) == code
+
+
+def test_weekly_bad_token_setting_exits_2_before_gmail(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen = _wire(monkeypatch)
+    monkeypatch.setenv("NM_GMAIL_TOKEN_B64", "%%%")
+    assert main(["weekly"]) == 2
+    assert "scopes" not in seen
+    assert "NM_GMAIL_TOKEN_B64" in capsys.readouterr().err

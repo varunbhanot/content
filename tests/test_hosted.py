@@ -1,5 +1,6 @@
 import threading
 from datetime import date
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -32,7 +33,7 @@ def test_once_per_day_runs_once_and_repeats_the_first_answer() -> None:
 
     def _run() -> ScheduledOutcome:
         calls.append(1)
-        return ScheduledOutcome(0, "Delivered 'x'.")
+        return ScheduledOutcome(0, "Delivered 'x'.", delivered=True)
 
     once = OncePerDay(_run, lambda: DAY)
     assert once() == "OK: Delivered 'x'."
@@ -42,16 +43,24 @@ def test_once_per_day_runs_once_and_repeats_the_first_answer() -> None:
 
 def test_once_per_day_runs_again_on_a_new_day() -> None:
     days = iter([DAY, date(2026, 11, 13)])
-    once = OncePerDay(lambda: ScheduledOutcome(1, "failed"), lambda: next(days))
+    once = OncePerDay(lambda: ScheduledOutcome(1, "failed", delivered=True), lambda: next(days))
     assert once() == "Exit 1: failed"
     assert once() == "Exit 1: failed"
 
 
-def test_config_errors_are_not_cached_so_a_fixed_secret_can_retry() -> None:
-    outcomes = iter([ScheduledOutcome(2, "Config error: x"), ScheduledOutcome(0, "Delivered.")])
+def test_undelivered_results_are_not_cached_so_a_fix_can_retry() -> None:
+    outcomes = iter(
+        [
+            ScheduledOutcome(2, "Config error: x"),
+            ScheduledOutcome(1, "Could not deliver"),
+            ScheduledOutcome(0, "Delivered.", delivered=True),
+        ]
+    )
     once = OncePerDay(lambda: next(outcomes), lambda: DAY)
     assert once() == "Exit 2: Config error: x"
+    assert once() == "Exit 1: Could not deliver"
     assert once() == "OK: Delivered."
+    assert once() == "Already ran for 2026-11-06: OK: Delivered."
 
 
 def test_concurrent_call_is_refused() -> None:
@@ -60,7 +69,7 @@ def test_concurrent_call_is_refused() -> None:
     def _slow() -> ScheduledOutcome:
         started.set()
         release.wait(5)
-        return ScheduledOutcome(0, "done")
+        return ScheduledOutcome(0, "done", delivered=True)
 
     once = OncePerDay(_slow, lambda: DAY)
     results: list[str] = []
@@ -90,5 +99,14 @@ def test_tool_takes_no_arguments_and_runs_the_scheduled_job(
     assert seen == [None]
 
 
-def test_runner_counts_days_in_utc() -> None:
-    assert hosted._utc_today() == hosted.datetime.now(hosted.UTC).date()
+def test_runner_counts_days_in_the_issue_time_zone(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: False)
+    monkeypatch.setenv("NM_TIMEZONE", "Pacific/Kiritimati")  # UTC+14: often "tomorrow"
+    now = hosted.datetime.now(hosted.UTC)
+    assert hosted._issue_today() == now.astimezone(ZoneInfo("Pacific/Kiritimati")).date()
+
+
+def test_runner_falls_back_to_utc_on_a_bad_zone(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: False)
+    monkeypatch.setenv("NM_TIMEZONE", "Nowhere/Land")
+    assert hosted._issue_today() == hosted.datetime.now(hosted.UTC).date()

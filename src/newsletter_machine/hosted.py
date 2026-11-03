@@ -2,20 +2,22 @@
 
 The root ``agent.py`` gives a small runner model this tool; the schedule's prompt asks it to
 call the tool once. The tool runs ``newsletter-machine weekly`` in-process (temporary folder,
-inbox delivery). A second call for the same day returns the first answer instead of paying
-for another issue, and a call while a run is in progress is refused.
+inbox delivery). Once a run has reached the inbox, a second call for the same issue date
+returns the first answer instead of paying for another issue; a call while a run is in
+progress is refused.
 """
 
 import logging
 import threading
 from collections.abc import Callable
 from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 from langchain_core.tools import tool
 
-from newsletter_machine.cli_common import EXIT_CONFIG
 from newsletter_machine.cli_weekly import ScheduledOutcome, run_scheduled
-from newsletter_machine.config import load_runner_model
+from newsletter_machine.config import ConfigError, load_runner_model, load_weekly_settings
+from newsletter_machine.weekly import issue_date
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ class OncePerDay:
                 return f"Already ran for {day}: {self._done[day]}"
             outcome = self._run()
             answer = _answer(outcome)
-            if outcome.exit_code != EXIT_CONFIG:  # a config error ran nothing: allow a retry
+            if outcome.delivered:  # undelivered (config error, Gmail down): allow a retry
                 self._done = {**self._done, day: answer}
             return answer
         finally:
@@ -56,11 +58,16 @@ def scheduled_once() -> ScheduledOutcome:
     return run_scheduled(None)
 
 
-def _utc_today() -> date:
-    return datetime.now(UTC).date()
+def _issue_today() -> date:
+    """Today as the issue date sees it (``NM_TIMEZONE``; UTC when that is invalid)."""
+    try:
+        zone = load_weekly_settings().timezone
+    except ConfigError:
+        zone = ZoneInfo("UTC")
+    return issue_date(datetime.now(UTC), zone)
 
 
-_RUNNER = OncePerDay(scheduled_once, _utc_today)
+_RUNNER = OncePerDay(scheduled_once, _issue_today)
 
 
 def runner_model() -> str:

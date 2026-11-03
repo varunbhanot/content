@@ -10,8 +10,8 @@ import contextlib
 import io
 import logging
 import sys
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
 from typing import Literal, TextIO
@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 MAX_LOG_CHARS = 20_000  # keeps the message small; the tail holds the outcome
 RULE = "-" * 60
 NOTHING_SENT = "Nothing has been sent or published."
+LOG_FORMAT = "%(levelname)s %(name)s: %(message)s"
 
 Status = Literal["drafted", "no_links", "failed"]
 IssueRunner = Callable[[argparse.Namespace], int]
@@ -53,6 +54,19 @@ class WeeklyReport:
     message_id: str  # "" when delivery failed
     delivery_error: str = ""
     substack_line: str = ""
+    draft_path: Path | None = None  # set when this run wrote a draft
+
+
+def config_failure(mailbox: Mailbox, now: datetime, timezone: ZoneInfo, error: str) -> WeeklyReport:
+    """Tell Varun's inbox that the run could not start (e.g. a bad NM_TIMEZONE)."""
+    subject = f"Newsletter run failed ({issue_date(now, timezone)})"
+    body = f"{NOTHING_SENT}\n\nThe weekly run could not start:\n\n{error}\n"
+    report = WeeklyReport("failed", EXIT_CONFIG, subject, "")
+    try:
+        return replace(report, message_id=deliver(mailbox, Delivery(subject, body, ())))
+    except Exception as exc:  # Gmail API / network failures surface as many types
+        logger.warning("Delivery failed", exc_info=True)
+        return replace(report, delivery_error=f"{type(exc).__name__}: {exc}")
 
 
 @dataclass(frozen=True)
@@ -66,10 +80,10 @@ def issue_date(now: datetime, timezone: ZoneInfo) -> date:
     return now.astimezone(timezone).date()
 
 
-def issue_args(out: Path) -> argparse.Namespace:
+def issue_args(out: Path, *, overwrite: bool = False) -> argparse.Namespace:
     """The arguments ``issue --out OUT`` parses to: Gmail links, default window, no angle."""
     return argparse.Namespace(
-        out=out, angle=None, sources=None, links_file=None, since=None, overwrite=False
+        out=out, angle=None, sources=None, links_file=None, since=None, overwrite=overwrite
     )
 
 
@@ -88,10 +102,28 @@ class _Tee(io.TextIOBase):
         self._real.flush()
 
 
+@contextlib.contextmanager
+def _logging_to(log: io.StringIO) -> Iterator[None]:
+    """Copy log records (warnings, tracebacks) into the captured log for the run."""
+    handler = logging.StreamHandler(log)
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        yield
+    finally:
+        root.removeHandler(handler)
+
+
 def _captured(run: IssueRunner, args: argparse.Namespace) -> tuple[int, str]:
+    """Run ``issue`` with its prints and log records copied into a buffer.
+
+    The stdout/stderr swap is process-wide; the hosted tool allows one run at a time.
+    """
     log = io.StringIO()
     out, err = _Tee(sys.stdout, log), _Tee(sys.stderr, log)
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), _logging_to(log):
         try:
             code = run(args)
         except Exception as exc:  # a bug must still reach Varun's inbox
@@ -101,10 +133,19 @@ def _captured(run: IssueRunner, args: argparse.Namespace) -> tuple[int, str]:
     return code, log.getvalue()
 
 
-def _run_issue(run: IssueRunner, paths: IssuePaths) -> _IssueRun:
-    code, log = _captured(run, issue_args(paths.draft))
+def _read(path: Path) -> str | None:
+    """A file's text, or None when it is missing or unreadable (delivery must go on)."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        logger.warning("Could not read %s", path, exc_info=True)
+        return None
+
+
+def _run_issue(run: IssueRunner, paths: IssuePaths, overwrite: bool) -> _IssueRun:
+    code, log = _captured(run, issue_args(paths.draft, overwrite=overwrite))
     wrote = code != EXIT_CONFIG and paths.draft.is_file()  # exit 2 writes nothing
-    return _IssueRun(code, log, paths.draft.read_text(encoding="utf-8") if wrote else None)
+    return _IssueRun(code, log, _read(paths.draft) if wrote else None)
 
 
 def _status(run: _IssueRun) -> Status:
@@ -151,28 +192,33 @@ def _body(run: _IssueRun, substack_line: str) -> str:
 def _attachments(paths: IssuePaths, run: _IssueRun) -> tuple[tuple[str, str], ...]:
     if run.draft is None:
         return ()
-    files = (paths.draft, paths.critique, paths.notes)
-    return tuple((p.name, p.read_text(encoding="utf-8")) for p in files if p.is_file())
+    texts = ((p.name, _read(p)) for p in (paths.draft, paths.critique, paths.notes) if p.is_file())
+    return tuple((name, text) for name, text in texts if text is not None)
 
 
 def run_weekly(
-    out_dir: Path, now: datetime, settings: WeeklySettings, deps: WeeklyDeps
+    out_dir: Path,
+    now: datetime,
+    settings: WeeklySettings,
+    deps: WeeklyDeps,
+    *,
+    overwrite: bool = False,
 ) -> WeeklyReport:
     """Run this week's issue into ``out_dir`` and deliver the outcome to the inbox."""
     day = issue_date(now, settings.timezone)
     paths = issue_paths(out_dir / f"{day.isoformat()}.md")
-    run = _run_issue(deps.run_issue, paths)
+    run = _run_issue(deps.run_issue, paths, overwrite)
     status = _status(run)
     substack_line = _substack_line(deps, settings, run.draft)
     subject = _subject(status, run, day)
     delivery = Delivery(subject, _body(run, substack_line), _attachments(paths, run))
+    draft_path = paths.draft if run.draft is not None else None
+    report = WeeklyReport(status, run.code, subject, "", "", substack_line, draft_path)
     try:
-        message_id = deliver(deps.mailbox, delivery)
+        return replace(report, message_id=deliver(deps.mailbox, delivery))
     except Exception as exc:  # Gmail API / auth / network failures surface as many types
         logger.warning("Delivery failed", exc_info=True)
-        error = f"{type(exc).__name__}: {exc}"
-        return WeeklyReport(status, run.code, subject, "", error, substack_line)
-    return WeeklyReport(status, run.code, subject, message_id, "", substack_line)
+        return replace(report, delivery_error=f"{type(exc).__name__}: {exc}")
 
 
 def weekly_exit_code(report: WeeklyReport) -> int:

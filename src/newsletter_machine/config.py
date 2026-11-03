@@ -103,12 +103,13 @@ def _resolve_path(value: str, repo_root: Path | None) -> Path:
 
 
 def _voice_dir(value: str | None, repo_root: Path | None) -> Path:
-    """``NM_VOICE_DIR``; unset, ``./voice`` or else the project's own ``voice/`` (hosted runs
-    start outside the repo)."""
-    if value is not None:
-        return _resolve_path(value, repo_root)
-    local = _resolve_path(DEFAULT_VOICE_DIR, repo_root)
-    return local if local.is_dir() or repo_root is not None else PROJECT_ROOT / DEFAULT_VOICE_DIR
+    """``NM_VOICE_DIR`` (default ``voice``) from the cwd; a relative path missing there falls
+    back to the project's own folder, since hosted runs start outside the repo."""
+    raw = value or DEFAULT_VOICE_DIR
+    path = _resolve_path(raw, repo_root)
+    if path.is_dir() or repo_root is not None or Path(raw).is_absolute():
+        return path
+    return PROJECT_ROOT / raw
 
 
 def _require_provider_prefix(name: str, value: str) -> str:
@@ -154,7 +155,10 @@ def load_settings(
 
     voice_dir = _voice_dir(env.get("NM_VOICE_DIR"), repo_root)
     if not (voice_dir / "samples" / "hand").is_dir():
-        raise ConfigError(f"Voice corpus not found: {voice_dir}/samples/hand does not exist.")
+        raise ConfigError(
+            f"Voice corpus not found: {voice_dir}/samples/hand does not exist. "
+            "Set NM_VOICE_DIR to the voice/ folder."
+        )
 
     return Settings(
         anthropic_api_key=api_key,
