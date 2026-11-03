@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from newsletter_machine.voice import load_voice_corpus
+from newsletter_machine.voice import load_style_guide, load_voice_corpus, style_guide_sections
 
 REPO_VOICE = Path(__file__).resolve().parent.parent / "voice"
 
@@ -101,3 +101,34 @@ def test_load_voice_corpus_raises_when_era_folder_missing(
     (voice / "samples" / "ai-assisted").rmdir()
     with pytest.raises(ValueError, match="ai-assisted"):
         load_voice_corpus(voice)
+
+
+def test_load_style_guide_returns_body_without_front_matter(
+    make_voice_dir: Callable[..., Path],
+) -> None:
+    voice = make_voice_dir()
+    (voice / "style-guide.md").write_text("---\ntitle: g\n---\n\n# Guide\n\n## Rhythm\n\nShort.\n")
+    assert load_style_guide(voice).startswith("# Guide")
+
+
+def test_load_style_guide_raises_when_missing(make_voice_dir: Callable[..., Path]) -> None:
+    with pytest.raises(ValueError, match="style-guide.md"):
+        load_style_guide(make_voice_dir())
+
+
+def test_style_guide_sections_lists_h2_titles() -> None:
+    text = "# Top\n\n## Who's talking\n\ntext\n\n### Sub\n\n## Avoid  \n"
+    assert style_guide_sections(text) == ("Who's talking", "Avoid")
+
+
+def test_real_style_guide_has_seven_sections() -> None:
+    sections = style_guide_sections(load_style_guide(REPO_VOICE))
+    assert sections == (
+        "Who's talking",
+        "Openings",
+        "Rhythm",
+        "Devices",
+        "Structure and length",
+        "Closings",
+        "Avoid",
+    )

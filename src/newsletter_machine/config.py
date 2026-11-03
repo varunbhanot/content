@@ -34,6 +34,7 @@ class Settings:
     writer_model: str
     fast_model: str
     voice_dir: Path
+    critic_model: str
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,7 @@ def _resolve_path(value: str, repo_root: Path | None) -> Path:
 
 
 def _require_provider_prefix(name: str, value: str) -> str:
+    value = value.strip()  # a stray space from .env must not reach the API as part of the id
     provider, sep, model = value.partition(":")
     if not sep or not provider or not model:
         raise ConfigError(f"{name} must look like 'provider:model' (got {value!r}).")
@@ -81,6 +83,9 @@ def load_settings(
     writer_model = _require_provider_prefix(
         "NM_WRITER_MODEL", env.get("NM_WRITER_MODEL", DEFAULT_WRITER_MODEL)
     )
+    critic_model = _require_provider_prefix(
+        "NM_CRITIC_MODEL", env.get("NM_CRITIC_MODEL", "").strip() or writer_model
+    )
     fast_model = _require_provider_prefix(
         "NM_FAST_MODEL", env.get("NM_FAST_MODEL", DEFAULT_FAST_MODEL)
     )
@@ -94,6 +99,7 @@ def load_settings(
         writer_model=writer_model,
         fast_model=fast_model,
         voice_dir=voice_dir,
+        critic_model=critic_model,
     )
 
 

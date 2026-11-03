@@ -23,6 +23,35 @@ HELLO_SYSTEM_PROMPT = (
 READ_ONLY_PERMISSIONS = [FilesystemPermission(operations=["write"], paths=["/**"], mode="deny")]
 
 
+class AgentOutputError(RuntimeError):
+    """A model run finished but its output is unusable (empty, missing structure)."""
+
+
+def extract_text(content: Any) -> str:
+    """Flatten Anthropic message content (str or list of blocks) to plain text."""
+    if isinstance(content, str):
+        return content
+    return "".join(
+        block.get("text", "")
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+
+
+ANTHROPIC_PROVIDER = "anthropic"
+
+
+def make_chat_model(model: str, api_key: str) -> BaseChatModel:
+    """Turn a ``provider:model`` setting into a chat model.
+
+    ``api_key`` is the Anthropic key, so it is passed to Anthropic models only; any other
+    provider reads its own key from the environment and never receives this one.
+    """
+    if model.partition(":")[0] == ANTHROPIC_PROVIDER:
+        return init_chat_model(model, api_key=api_key)
+    return init_chat_model(model)
+
+
 def build_hello_agent(
     settings: Settings, *, model: str | BaseChatModel | None = None
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
@@ -31,7 +60,7 @@ def build_hello_agent(
     logger.debug("Building hello agent rooted at %s", settings.voice_dir)
     chosen = model or settings.writer_model
     if isinstance(chosen, str):
-        chosen = init_chat_model(chosen, api_key=settings.anthropic_api_key)
+        chosen = make_chat_model(chosen, settings.anthropic_api_key)
     return create_deep_agent(
         model=chosen,
         system_prompt=HELLO_SYSTEM_PROMPT,

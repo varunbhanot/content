@@ -2,7 +2,8 @@
 
 Deep-agent content machine for the *Beyond the AI Demo* newsletter. Phase 1 gives a runnable
 [`deepagents`](https://docs.langchain.com/oss/python/deepagents) skeleton on Anthropic, grounded in the
-hand-written voice corpus. Phase 2 turns the week's emailed links into clean source text.
+hand-written voice corpus. Phase 2 turns the week's emailed links into clean source text. Phase 3
+drafts an issue in Varun's voice from those sources and runs a voice critic over it.
 
 - Product plan: [`.claude/PRPs/prds/newsletter-content-machine.prd.md`](.claude/PRPs/prds/newsletter-content-machine.prd.md)
 - Voice corpus and split rule: [`voice/README.md`](voice/README.md)
@@ -69,6 +70,35 @@ uv run newsletter-machine ingest --links-file links.txt --out sources/this-week 
    strangers emailing the plus-address cannot inject URLs. If you share from another account, add it.
 4. First `ingest` run opens a browser for consent (read-only scope). The token is cached at
    `.secrets/gmail-token.json` with `0600` permissions and refreshed automatically.
+
+## Draft in Varun's voice
+
+`draft` runs the **writer** sub-agent on a folder written by `ingest`, then the **voice critic** once.
+
+```bash
+uv run newsletter-machine draft --sources sources/this-week --angle "evals are the moat" --out drafts/issue.md
+```
+
+- Writes `drafts/issue.md` (the draft, with a `## Sources` list and up to three `[VARUN: ...]`
+  markers where your own experience should go) and `drafts/issue.critique.md` (pass/fail per
+  checklist item, with quotes and suggested fixes; failures first).
+- `--angle` is optional; without it the writer picks the strongest single topic in the sources.
+  Sources that failed to ingest are skipped. `--overwrite` replaces an existing draft/critique.
+- The writer is grounded in the style guide and all hand-written posts (`voice/samples/hand/`);
+  AI-assisted posts are never shown to it.
+- Exit codes: 0 done, 1 model or write failure (if only the critic fails, the draft is kept),
+  2 config/usage error (no key, no usable sources, output exists, broken voice files).
+
+What shapes the voice (edit these, they are versioned in git):
+
+| File | What it does |
+|---|---|
+| [`src/newsletter_machine/prompts/writer.md`](src/newsletter_machine/prompts/writer.md) | Writer instructions; `$style_guide`, `$checklist`, `$samples` are filled in |
+| [`src/newsletter_machine/prompts/critic.md`](src/newsletter_machine/prompts/critic.md) | Critic instructions; `$style_guide`, `$checklist` (judgement items only) |
+| [`voice/critic-checklist.yaml`](voice/critic-checklist.yaml) | Checklist; each item cites a style-guide `## ` section. Items with `patterns`, `word_range` or `max_paragraph_chars` are checked exactly in code (em dashes, banned words, length) |
+
+`NM_CRITIC_MODEL` picks the critic's model (default: the writer model). The lead "editor" agent
+that plans, researches and loops draft and critique is Phase 4.
 
 ## Test
 
