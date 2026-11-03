@@ -23,6 +23,22 @@ uv sync
 cp .env.example .env   # then set ANTHROPIC_API_KEY
 ```
 
+## Run this week's issue
+
+The weekly manual run: reads the last 7 days of links from Gmail, then researches, drafts,
+critiques and revises. It writes `drafts/<date>.md`, `.critique.md` and `.notes.md`.
+
+```bash
+uv run newsletter-machine issue --since 7d --out drafts/$(date +%F).md
+```
+
+Add `--angle "your argument in a line"` to set the topic, or `--overwrite` to redo the same date.
+To also get the draft in your Gmail inbox, run `weekly` instead:
+
+```bash
+uv run newsletter-machine weekly --out-dir drafts
+```
+
 ## Run
 
 Smoke test: the agent lists the hand-written posts, reads two, and names three voice traits with quotes.
