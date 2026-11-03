@@ -23,6 +23,18 @@ uv sync
 cp .env.example .env   # then set ANTHROPIC_API_KEY
 ```
 
+Optional: to get the illustrator's diagrams as PNG/GIF files Substack accepts (instead of SVG
+links), install the `render` extra and a Chromium for Playwright once:
+
+```bash
+uv sync --extra render
+uv run playwright install chromium
+```
+
+If you already have a Chromium Playwright cannot find, skip the second command and set
+`NM_CHROMIUM_PATH` in `.env` to its binary. Without either, visuals are still made and linked
+as SVG; set `NM_RENDER_VISUALS=false` to skip rendering altogether.
+
 ## Run this week's issue
 
 The weekly manual run: reads the last 7 days of links from Gmail, then researches, drafts,
