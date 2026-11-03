@@ -1,5 +1,8 @@
 """Environment-based configuration, validated at the boundary."""
 
+import base64
+import binascii
+import json
 import logging
 import math
 import os
@@ -7,6 +10,9 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import find_dotenv, load_dotenv
 
@@ -15,6 +21,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_WRITER_MODEL = "anthropic:claude-sonnet-5-5"
 DEFAULT_FAST_MODEL = "anthropic:claude-haiku-5-5"
 DEFAULT_VOICE_DIR = "voice"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # the repo (editable install, hosted image)
+DEFAULT_TIMEZONE = "Asia/Kolkata"
+TOKEN_INFO_KEYS = ("refresh_token", "client_id", "client_secret")
+TRUE_WORDS = frozenset({"1", "true", "yes", "on"})
+FALSE_WORDS = frozenset({"", "0", "false", "no", "off"})
 DEFAULT_GMAIL_LABEL = "newsletter"
 DEFAULT_GMAIL_CLIENT_SECRETS = ".secrets/gmail-client.json"
 DEFAULT_GMAIL_TOKEN = ".secrets/gmail-token.json"
@@ -57,6 +68,26 @@ class IngestSettings:
     gmail_token: Path
     fetch_timeout: float
     transcript_languages: tuple[str, ...]
+    # Headless OAuth token (NM_GMAIL_TOKEN_B64); when set, Gmail never opens a browser.
+    gmail_token_info: Mapping[str, Any] | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True)
+class SubstackSettings:
+    """Opt-in Substack draft step; one of ``cookies`` or ``email``+``password`` is set."""
+
+    publication_url: str
+    cookies: str = field(default="", repr=False)
+    email: str = ""
+    password: str = field(default="", repr=False)
+
+
+@dataclass(frozen=True)
+class WeeklySettings:
+    """Settings only ``weekly`` (the scheduled run) reads."""
+
+    timezone: ZoneInfo
+    substack: SubstackSettings | None  # None unless NM_SUBSTACK_DRAFT opts in
 
 
 def _load_env(env: Mapping[str, str] | None) -> Mapping[str, str]:
@@ -69,6 +100,15 @@ def _load_env(env: Mapping[str, str] | None) -> Mapping[str, str]:
 def _resolve_path(value: str, repo_root: Path | None) -> Path:
     path = Path(value)
     return path if path.is_absolute() else (repo_root or Path.cwd()) / path
+
+
+def _voice_dir(value: str | None, repo_root: Path | None) -> Path:
+    """``NM_VOICE_DIR``; unset, ``./voice`` or else the project's own ``voice/`` (hosted runs
+    start outside the repo)."""
+    if value is not None:
+        return _resolve_path(value, repo_root)
+    local = _resolve_path(DEFAULT_VOICE_DIR, repo_root)
+    return local if local.is_dir() or repo_root is not None else PROJECT_ROOT / DEFAULT_VOICE_DIR
 
 
 def _require_provider_prefix(name: str, value: str) -> str:
@@ -112,7 +152,7 @@ def load_settings(
         "NM_FAST_MODEL", env.get("NM_FAST_MODEL", DEFAULT_FAST_MODEL)
     )
 
-    voice_dir = _resolve_path(env.get("NM_VOICE_DIR", DEFAULT_VOICE_DIR), repo_root)
+    voice_dir = _voice_dir(env.get("NM_VOICE_DIR"), repo_root)
     if not (voice_dir / "samples" / "hand").is_dir():
         raise ConfigError(f"Voice corpus not found: {voice_dir}/samples/hand does not exist.")
 
@@ -135,6 +175,16 @@ def load_editor_settings(
     )
     return EditorSettings(
         editor_model=editor_model, max_revisions=_max_revisions(env.get("NM_MAX_REVISIONS", ""))
+    )
+
+
+def load_runner_model(env: Mapping[str, str] | None = None) -> str:
+    """The hosted runner's model: ``NM_RUNNER_MODEL``, else ``NM_FAST_MODEL`` (it only calls
+    one tool)."""
+    env = _load_env(env)
+    fast = env.get("NM_FAST_MODEL", "").strip() or DEFAULT_FAST_MODEL
+    return _require_provider_prefix(
+        "NM_RUNNER_MODEL", env.get("NM_RUNNER_MODEL", "").strip() or fast
     )
 
 
@@ -163,9 +213,15 @@ def _allowed_senders(value: str) -> tuple[str, ...]:
 
 
 def load_ingest_settings(
-    env: Mapping[str, str] | None = None, *, repo_root: Path | None = None
+    env: Mapping[str, str] | None = None,
+    *,
+    repo_root: Path | None = None,
+    ignore_token: bool = False,
 ) -> IngestSettings:
-    """Load ingest settings from ``env`` (or ``.env`` + process env when ``env`` is None)."""
+    """Load ingest settings from ``env`` (or ``.env`` + process env when ``env`` is None).
+
+    ``ignore_token`` skips ``NM_GMAIL_TOKEN_B64`` (``gmail-auth`` replaces a broken one).
+    """
     env = _load_env(env)
     label = env.get("NM_GMAIL_LABEL", DEFAULT_GMAIL_LABEL).strip()
     if not label:
@@ -186,4 +242,73 @@ def load_ingest_settings(
             "NM_FETCH_TIMEOUT", env.get("NM_FETCH_TIMEOUT", DEFAULT_FETCH_TIMEOUT)
         ),
         transcript_languages=languages,
+        gmail_token_info=None if ignore_token else _token_info(env.get("NM_GMAIL_TOKEN_B64", "")),
+    )
+
+
+def _token_info(value: str) -> dict[str, Any] | None:
+    """Decode ``NM_GMAIL_TOKEN_B64``; errors name the variable, never its value."""
+    value = value.strip()
+    if not value:
+        return None
+    hint = "NM_GMAIL_TOKEN_B64 must be the base64 of the token file 'gmail-auth' writes"
+    try:
+        info = json.loads(base64.b64decode(value, validate=True))
+    except (binascii.Error, ValueError):
+        raise ConfigError(f"{hint}; it could not be decoded.") from None
+    if not isinstance(info, dict):
+        raise ConfigError(f"{hint}; it is not a JSON object.")
+    missing = [
+        key for key in TOKEN_INFO_KEYS if not isinstance(info.get(key), str) or not info[key]
+    ]
+    if missing:
+        raise ConfigError(f"{hint}; it lacks {', '.join(missing)}.")
+    return info
+
+
+def _flag(name: str, value: str) -> bool:
+    word = value.strip().lower()
+    if word in TRUE_WORDS:
+        return True
+    if word in FALSE_WORDS:
+        return False
+    raise ConfigError(f"{name} must be true or false (got {value!r}).")
+
+
+def _timezone(value: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(value.strip())
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ConfigError(
+            f"NM_TIMEZONE must be an IANA time zone such as 'Asia/Kolkata' (got {value!r})."
+        ) from None
+
+
+def _substack(env: Mapping[str, str]) -> SubstackSettings | None:
+    if not _flag("NM_SUBSTACK_DRAFT", env.get("NM_SUBSTACK_DRAFT", "")):
+        return None
+    url = env.get("SUBSTACK_PUBLICATION_URL", "").strip().rstrip("/")
+    parts = urlsplit(url)
+    if parts.scheme != "https" or not parts.netloc:
+        raise ConfigError(
+            "NM_SUBSTACK_DRAFT is on: set SUBSTACK_PUBLICATION_URL to your https:// publication "
+            f"address (got {url!r})."
+        )
+    cookies = env.get("SUBSTACK_COOKIES", "").strip()
+    email = env.get("SUBSTACK_EMAIL", "").strip()
+    password = env.get("SUBSTACK_PASSWORD", "")
+    if not cookies and not (email and password):
+        raise ConfigError(
+            "NM_SUBSTACK_DRAFT is on: set SUBSTACK_COOKIES, or SUBSTACK_EMAIL and "
+            "SUBSTACK_PASSWORD."
+        )
+    return SubstackSettings(url, cookies=cookies, email=email, password=password)
+
+
+def load_weekly_settings(env: Mapping[str, str] | None = None) -> WeeklySettings:
+    """``NM_TIMEZONE`` (issue date) and the opt-in Substack step (``NM_SUBSTACK_DRAFT``)."""
+    env = _load_env(env)
+    return WeeklySettings(
+        timezone=_timezone(env.get("NM_TIMEZONE", DEFAULT_TIMEZONE)),
+        substack=_substack(env),
     )

@@ -4,7 +4,7 @@ import base64
 import logging
 import os
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from html.parser import HTMLParser
 from pathlib import Path
@@ -22,7 +22,11 @@ from newsletter_machine.sources import InboxLink, dedupe_by_url, extract_urls
 
 logger = logging.getLogger(__name__)
 
-GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+READ_SCOPES = ("https://www.googleapis.com/auth/gmail.readonly",)
+# Adds messages to the mailbox (like IMAP APPEND); it cannot send mail.
+INSERT_SCOPE = "https://www.googleapis.com/auth/gmail.insert"
+DELIVERY_SCOPES = (*READ_SCOPES, INSERT_SCOPE)
+REAUTH_HINT = "Run 'uv run newsletter-machine gmail-auth' and update NM_GMAIL_TOKEN_B64."
 USER_ID = "me"
 MAX_NOTE_CHARS = 280
 # Lines where Varun's own words end: signature ("-- "), forwards, replies, mobile footers.
@@ -197,6 +201,21 @@ class GoogleGmailClient:
         result: Mapping[str, Any] = request.execute()
         return result
 
+    def profile_address(self) -> str:
+        """The account's own address (readonly scope)."""
+        profile = self._service.users().getProfile(userId=USER_ID).execute()
+        return str(profile["emailAddress"])
+
+    def insert_message(self, raw: bytes, label_ids: Sequence[str]) -> str:
+        """Add an RFC 822 message to the mailbox (``gmail.insert``: nothing is sent)."""
+        body = {"raw": base64.urlsafe_b64encode(raw).decode("ascii"), "labelIds": list(label_ids)}
+        request = (
+            self._service.users()
+            .messages()
+            .insert(userId=USER_ID, body=body, internalDateSource="dateHeader")
+        )
+        return str(request.execute()["id"])
+
 
 def _save_token(path: Path, creds: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=TOKEN_DIR_MODE)
@@ -206,12 +225,16 @@ def _save_token(path: Path, creds: Any) -> None:
     path.chmod(TOKEN_FILE_MODE)
 
 
-def _cached_credentials(settings: IngestSettings) -> Any | None:
+def _cached_credentials(settings: IngestSettings, scopes: Sequence[str]) -> Any | None:
     if not settings.gmail_token.exists():
         return None
     creds = Credentials.from_authorized_user_file(  # type: ignore[no-untyped-call]
-        str(settings.gmail_token), GMAIL_SCOPES
+        str(settings.gmail_token),
+        None,  # None: keep the scopes the token was granted
     )
+    if not creds.has_scopes(list(scopes)):
+        logger.warning("Cached Gmail token lacks a needed permission; asking for consent again")
+        return None
     if creds.valid:
         return creds
     if creds.expired and creds.refresh_token:
@@ -223,19 +246,63 @@ def _cached_credentials(settings: IngestSettings) -> Any | None:
     return None
 
 
-def build_gmail_client(settings: IngestSettings) -> GoogleGmailClient:
-    """Authorise (cached token, refresh, or first-run browser consent) and build the client."""
+def _headless_credentials(info: Mapping[str, Any], scopes: Sequence[str]) -> Any:
+    """Credentials from ``NM_GMAIL_TOKEN_B64``: refreshed now, never a browser."""
+    creds = Credentials.from_authorized_user_info(dict(info), None)  # type: ignore[no-untyped-call]
+    if not creds.has_scopes(list(scopes)):
+        raise ConfigError(
+            f"The Gmail token in NM_GMAIL_TOKEN_B64 does not grant {', '.join(scopes)}. "
+            + REAUTH_HINT
+        )
+    try:
+        creds.refresh(Request())
+    except RefreshError as exc:
+        raise ConfigError(
+            f"Google rejected the Gmail token in NM_GMAIL_TOKEN_B64 ({exc}). " + REAUTH_HINT
+        ) from None
+    return creds
+
+
+def _require_client_file(settings: IngestSettings) -> None:
     if not settings.gmail_client_secrets.is_file():
         raise ConfigError(
             f"Gmail OAuth client file not found at {settings.gmail_client_secrets}. Create a "
             "Desktop OAuth client in Google Cloud (Gmail API enabled), download the JSON there, "
-            "or point NM_GMAIL_CLIENT_SECRETS at it."
+            "or point NM_GMAIL_CLIENT_SECRETS at it. Scheduled runs use NM_GMAIL_TOKEN_B64 instead."
         )
-    creds = _cached_credentials(settings)
-    if creds is None:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            str(settings.gmail_client_secrets), GMAIL_SCOPES
-        )
-        creds = flow.run_local_server(port=0)
-    _save_token(settings.gmail_token, creds)
+
+
+def _consent(settings: IngestSettings, scopes: Sequence[str]) -> Any:
+    flow = InstalledAppFlow.from_client_secrets_file(
+        str(settings.gmail_client_secrets), list(scopes)
+    )
+    return flow.run_local_server(port=0)
+
+
+def authorize(settings: IngestSettings, scopes: Sequence[str] = DELIVERY_SCOPES) -> Path:
+    """Browser consent for ``scopes`` (always asks), saving the token file; returns its path."""
+    _require_client_file(settings)
+    _save_token(settings.gmail_token, _consent(settings, scopes))
+    return settings.gmail_token
+
+
+def _service(creds: Any) -> GoogleGmailClient:
     return GoogleGmailClient(build("gmail", "v1", credentials=creds, cache_discovery=False))
+
+
+def build_gmail_client(
+    settings: IngestSettings, scopes: Sequence[str] = READ_SCOPES
+) -> GoogleGmailClient:
+    """Authorise and build the client.
+
+    With ``NM_GMAIL_TOKEN_B64`` (scheduled/hosted runs) the token is refreshed in memory and a
+    problem is a ``ConfigError``. Otherwise: cached token, refresh, or first-run browser consent.
+    """
+    if settings.gmail_token_info is not None:
+        return _service(_headless_credentials(settings.gmail_token_info, scopes))
+    _require_client_file(settings)
+    creds = _cached_credentials(settings, scopes)
+    if creds is None:
+        creds = _consent(settings, scopes)
+    _save_token(settings.gmail_token, creds)
+    return _service(creds)

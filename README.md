@@ -3,7 +3,9 @@
 Deep-agent content machine for the *Beyond the AI Demo* newsletter. Phase 1 gives a runnable
 [`deepagents`](https://docs.langchain.com/oss/python/deepagents) skeleton on Anthropic, grounded in the
 hand-written voice corpus. Phase 2 turns the week's emailed links into clean source text. Phase 3
-drafts an issue in Varun's voice from those sources and runs a voice critic over it.
+drafts an issue in Varun's voice from those sources and runs a voice critic over it. Phase 4
+runs the whole week in one command; Phase 5 runs it on a weekly schedule and puts the result in
+your Gmail inbox.
 
 - Product plan: [`.claude/PRPs/prds/newsletter-content-machine.prd.md`](.claude/PRPs/prds/newsletter-content-machine.prd.md)
 - Voice corpus and split rule: [`voice/README.md`](voice/README.md)
@@ -129,6 +131,90 @@ uv run newsletter-machine issue --since 7d --angle "evals are the moat" --out dr
 | [`src/newsletter_machine/prompts/editor.md`](src/newsletter_machine/prompts/editor.md) | Editor (lead) instructions; `$writer_runs`, `$max_revisions` |
 | [`src/newsletter_machine/prompts/researcher.md`](src/newsletter_machine/prompts/researcher.md) | Per-source research notes |
 
+## Weekly schedule: `weekly` and Managed Deep Agents
+
+`weekly` is `issue` made hands-off: it runs `issue` for today's date (in `NM_TIMEZONE`) on the
+last 7 days of Gmail links, then puts one message in **your own Gmail inbox** (unread):
+
+- the draft in the body (Markdown, unchanged) with `.md`, `.critique.md` and `.notes.md` attached;
+- or "no links this week", or "run failed" with the run log.
+
+Delivery uses Gmail `messages.insert` (permission `gmail.insert`): the message is added to your
+mailbox like a received one. **Nothing is ever sent** (that permission cannot send mail), and the
+message never gets the ingest label, so next week's `ingest` does not read it.
+
+```bash
+uv run newsletter-machine weekly --out-dir drafts   # local run; without --out-dir the files go to a temp folder
+```
+
+Exit codes: the `issue` run's own non-zero code, else 1 if delivery failed, else 0; 2 for a
+configuration problem (token, time zone, Substack settings), always before any model call.
+
+### Optional: Substack draft (off by default)
+
+With `NM_SUBSTACK_DRAFT=true`, a successful run also creates an **unpublished** Substack draft
+with the unofficial [`python-substack`](https://pypi.org/project/python-substack/) client (pinned
+to 0.10.0). It never publishes, schedules or sends. The draft's `# Title` line becomes the
+Substack title; the rest of the Markdown is passed unchanged (Sources list and any `[VARUN: ...]`
+markers included). The draft link goes in the inbox message; a Substack failure is reported there
+and does not stop delivery. Settings: `SUBSTACK_PUBLICATION_URL` plus `SUBSTACK_COOKIES`
+(recommended: the `substack.sid=...` cookie string from a signed-in browser) or
+`SUBSTACK_EMAIL` and `SUBSTACK_PASSWORD`.
+
+### Runbook: deploy to LangSmith Managed Deep Agents
+
+The repo root is a Managed Deep Agents (MDA) project: `agent.py` (a small runner agent whose
+only tool, `run_weekly_issue`, runs the same code as `weekly`), `instructions.md` (its prompt),
+`identity.py` (callers need a LangSmith API key) and `schedules/weekly_issue.py` (**Fridays
+07:00 Asia/Kolkata**). MDA is in public beta; cron schedules appear to need a LangSmith Plus plan.
+
+1. **Google, once.** In Google Cloud Console → *OAuth consent screen*, set the app's publishing
+   status to **In production** (unverified is fine for your own account). In *Testing* status,
+   refresh tokens expire after 7 days and the Friday run would stop working.
+2. **Token with read + insert.** Opens a browser; saves `.secrets/gmail-token.json`.
+
+   ```bash
+   uv run newsletter-machine gmail-auth
+   ```
+
+3. **Put the token in `.env`** (base64, one line; `.env` is git-ignored):
+
+   ```bash
+   printf 'NM_GMAIL_TOKEN_B64=%s\n' "$(base64 < .secrets/gmail-token.json | tr -d '\n')" >> .env
+   ```
+
+4. **Try it locally** (one real issue's API cost; a message lands in your inbox):
+
+   ```bash
+   uv run newsletter-machine weekly --out-dir drafts
+   ```
+
+5. **Install the MDA CLI** and add your LangSmith key (`LANGSMITH_API_KEY`, plus
+   `LANGSMITH_WORKSPACE_ID` if your key needs one) to `.env`:
+
+   ```bash
+   uv tool install "managed-deepagents==0.9.4"
+   ```
+
+6. **Deploy.** `mda deploy` reads `.env`, uses `LANGSMITH_API_KEY` itself and uploads every other
+   variable as a deployment secret (`ANTHROPIC_API_KEY`, `NM_GMAIL_TOKEN_B64`, model names,
+   `NM_*`, `SUBSTACK_*`). After the deployment is live it creates the cron from
+   `schedules/weekly_issue.py`.
+
+   ```bash
+   mda build .     # optional: compile only, writes .mda/build
+   mda deploy .
+   mda logs .      # follow the deployed agent's logs
+   ```
+
+7. **Check** the deployment and its cron in LangSmith (*Deployments*). The first Friday run should
+   leave "Newsletter draft: ..." in your inbox.
+
+Change the time: edit `cron`/`timezone` in `schedules/weekly_issue.py` (literals only; MDA rejects
+env vars there), set `NM_TIMEZONE` to the same zone, run `mda deploy .`. Stop the schedule:
+delete that file and `mda deploy .`, or remove everything with `mda delete .`. New token: repeat
+steps 2, 3 and 6.
+
 ## Test
 
 ```bash
@@ -165,3 +251,10 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy src
 | `NM_GMAIL_TOKEN` | `.secrets/gmail-token.json` | Cached OAuth token (written on first run) |
 | `NM_FETCH_TIMEOUT` | `20` | Seconds allowed per page download (and per transcript request) |
 | `NM_TRANSCRIPT_LANGUAGES` | `en` | Transcript language preference, comma-separated |
+| `NM_GMAIL_TOKEN_B64` | unset | Base64 of the `gmail-auth` token; when set, Gmail never opens a browser (scheduled runs) |
+| `NM_TIMEZONE` | `Asia/Kolkata` | Time zone for the `weekly` issue date |
+| `NM_RUNNER_MODEL` | `NM_FAST_MODEL` | Hosted runner agent's model (it only calls one tool) |
+| `NM_SUBSTACK_DRAFT` | `false` | `true` adds an unpublished Substack draft to `weekly` |
+| `SUBSTACK_PUBLICATION_URL` | unset | e.g. `https://varunbhanot.substack.com` (needed when the above is on) |
+| `SUBSTACK_COOKIES` | unset | Browser cookie string (preferred), or set `SUBSTACK_EMAIL` and `SUBSTACK_PASSWORD` |
+| `LANGSMITH_API_KEY` | unset | Tracing; also used by `mda deploy` |

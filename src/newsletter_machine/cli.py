@@ -1,4 +1,4 @@
-"""Command-line entry point: ``newsletter-machine hello``, ``ingest``, ``draft``, ``issue``."""
+"""Command-line entry point: hello, ingest, draft, issue, weekly and gmail-auth."""
 
 import argparse
 import logging
@@ -23,6 +23,7 @@ from newsletter_machine.cli_common import (
     write_reported,
 )
 from newsletter_machine.cli_issue import add_issue_parser, run_issue
+from newsletter_machine.cli_weekly import add_weekly_parsers, run_gmail_auth, run_weekly_command
 from newsletter_machine.config import (
     ConfigError,
     IngestSettings,
@@ -74,6 +75,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     draft.add_argument("--overwrite", action="store_true", help="Replace existing draft/critique")
     add_issue_parser(sub)
+    add_weekly_parsers(sub)
     return parser
 
 
@@ -221,4 +223,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_draft(args)
     if args.command == "issue":
         return run_issue(args)
+    if args.command == "weekly":
+        return run_weekly_command(args)
+    if args.command == "gmail-auth":
+        return run_gmail_auth(args)
     return _run_hello(args.question)

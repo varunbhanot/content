@@ -176,11 +176,22 @@ def _settings(tmp_path: Path) -> IngestSettings:
 
 
 class _FakeCreds:
-    def __init__(self, *, valid: bool, expired: bool = False, refresh_token: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        valid: bool,
+        expired: bool = False,
+        refresh_token: str = "",
+        scopes: tuple[str, ...] = tuple(gmail.READ_SCOPES),
+    ) -> None:
         self.valid = valid
         self.expired = expired
         self.refresh_token = refresh_token
         self.refreshed = False
+        self.scopes = scopes
+
+    def has_scopes(self, scopes: list[str]) -> bool:
+        return set(scopes) <= set(self.scopes)
 
     def refresh(self, request: Any) -> None:
         self.refreshed = True

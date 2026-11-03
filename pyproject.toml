@@ -16,9 +16,11 @@ dependencies = [
     "langchain-core>=1.0",
     "langgraph>=1.2",
     "python-dotenv>=1.0",
+    "python-substack==0.10.0",
     "pyyaml>=6",
     "requests>=2.34.2",
     "trafilatura>=2.3.1",
+    "tzdata>=2025.2",
     "youtube-transcript-api>=1.2.4",
 ]
 
@@ -34,6 +36,9 @@ dev = [
     "types-PyYAML",
     "types-requests>=2.33.0.20261030",
 ]
+
+[tool.mda]
+python-version = "3.13"  # the Managed Deep Agents image; matches .python-version
 
 [build-system]
 requires = ["hatchling"]
