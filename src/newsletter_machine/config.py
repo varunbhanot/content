@@ -62,6 +62,8 @@ class EditorSettings:
     max_revisions: int
     illustrator_model: str = ""
     max_visuals: int = DEFAULT_MAX_VISUALS
+    render_visuals: bool = True  # SVG -> PNG/GIF in headless Chromium (the render extra)
+    chromium_path: str = ""  # blank = Playwright's own browser
 
 
 @dataclass(frozen=True)
@@ -180,7 +182,8 @@ def load_editor_settings(
     settings: Settings, env: Mapping[str, str] | None = None
 ) -> EditorSettings:
     """``NM_EDITOR_MODEL`` and ``NM_ILLUSTRATOR_MODEL`` (blank = the writer model),
-    ``NM_MAX_REVISIONS`` (0 to 3) and ``NM_MAX_VISUALS`` (0 to 5, 0 = no illustrator)."""
+    ``NM_MAX_REVISIONS`` (0 to 3), ``NM_MAX_VISUALS`` (0 to 5, 0 = no illustrator),
+    ``NM_RENDER_VISUALS`` (default true) and ``NM_CHROMIUM_PATH`` (blank = Playwright's)."""
     env = _load_env(env)
     editor_model = _require_provider_prefix(
         "NM_EDITOR_MODEL", env.get("NM_EDITOR_MODEL", "").strip() or settings.writer_model
@@ -196,6 +199,10 @@ def load_editor_settings(
         max_visuals=_bounded_int(
             "NM_MAX_VISUALS", env.get("NM_MAX_VISUALS", ""), DEFAULT_MAX_VISUALS, MAX_VISUALS_LIMIT
         ),
+        render_visuals=_flag(
+            "NM_RENDER_VISUALS", env.get("NM_RENDER_VISUALS", "").strip() or "true"
+        ),
+        chromium_path=env.get("NM_CHROMIUM_PATH", "").strip(),
     )
 
 

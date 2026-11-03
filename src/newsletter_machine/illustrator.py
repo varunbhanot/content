@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from newsletter_machine.agent import AgentOutputError
 from newsletter_machine.prompts import Prompt, load_prompt, render
+from newsletter_machine.render import Raster, Renderer, RenderError
 from newsletter_machine.sources import SourceDoc
 from newsletter_machine.visuals import (
     VisualError,
@@ -69,6 +70,19 @@ class Visual:
     content: str  # cleaned SVG, Mermaid source, or the image prompt
     animated: bool  # what the file actually does, not what the model claimed
     removed: tuple[str, ...] = ()
+    raster: Raster | None = None  # the PNG/GIF the draft links, when rendering worked
+    render_error: str = ""
+
+    @property
+    def raster_path(self) -> str | None:
+        if self.raster is None or self.path is None:
+            return None
+        return f"{self.path.rsplit('.', 1)[0]}.{self.raster.ext}"
+
+    @property
+    def linked_path(self) -> str | None:
+        """What the draft points at: the PNG/GIF if rendered, else the source file."""
+        return self.raster_path or self.path
 
 
 @dataclass(frozen=True)
@@ -140,7 +154,7 @@ def _block(visual: Visual, image_dir: str) -> str:
     if visual.path.endswith(".mmd"):  # check_mermaid refused fences, so this cannot break out
         return f"```mermaid\n{visual.content}\n```\n\n*{caption}*"
     alt = plain_text(visual.spec.alt, CAPTION_LIMIT)
-    return f"![{alt}]({quote(image_dir)}/{visual.path})\n\n*{caption}*"
+    return f"![{alt}]({quote(image_dir)}/{visual.linked_path})\n\n*{caption}*"
 
 
 def _checked(
@@ -165,6 +179,24 @@ def _placed(draft: str, visuals: Sequence[Visual], image_dir: str) -> tuple[str,
     return placement.draft, set(placement.unplaced)
 
 
+def _rendered(visuals: Sequence[Visual], renderer: Renderer | None) -> list[Visual]:
+    """SVG visuals with their PNG/GIF; a render failure keeps the SVG and records why."""
+    if renderer is None:
+        return list(visuals)
+    out = []
+    for visual in visuals:
+        if visual.path is None or not visual.path.endswith(".svg"):
+            out.append(visual)
+            continue
+        try:
+            raster = renderer.render(visual.content, animated=visual.animated)
+            out.append(replace(visual, raster=raster))
+        except RenderError as exc:
+            logger.warning("Rendering visual-%d failed: %s", visual.number, exc)
+            out.append(replace(visual, render_error=str(exc)))
+    return out
+
+
 def illustrate(
     illustrator: CompiledSubAgent,
     draft: str,
@@ -172,8 +204,12 @@ def illustrate(
     *,
     max_visuals: int,
     image_dir: str,
+    renderer: Renderer | None = None,
 ) -> Illustration:
-    """Run the illustrator once on ``draft``; returns the draft with visuals placed."""
+    """Run the illustrator once on ``draft``; returns the draft with visuals placed.
+
+    With a ``renderer``, each SVG also gets a PNG (static) or GIF (animated), and the draft
+    links that instead, since Substack takes neither SVG nor its animation."""
     logger.info("Illustrator reading a %d-character draft", len(draft))
     task = illustrator_task(draft, docs)
     result = illustrator["runnable"].invoke({"messages": [{"role": "user", "content": task}]})
@@ -188,7 +224,7 @@ def illustrate(
         for v in built
         if str(v.proposal) in unplaced
     ]
-    kept = _numbered([v for v in built if str(v.proposal) not in unplaced])
+    kept = _rendered(_numbered([v for v in built if str(v.proposal) not in unplaced]), renderer)
     placed, _ = _placed(draft, kept, image_dir)  # ...then place with gap-free numbers
     rejected.sort()
     return Illustration(placed, tuple(kept), tuple(rejected), output.skipped.strip())
@@ -206,6 +242,10 @@ def write_visuals(illustration: Illustration, folder: Path) -> tuple[Path, ...]:
         target = folder / visual.path
         target.write_text(visual.content + "\n", encoding="utf-8")
         written.append(target)
+        if visual.raster is not None and visual.raster_path is not None:
+            raster = folder / visual.raster_path
+            raster.write_bytes(visual.raster.data)
+            written.append(raster)
     return tuple(written)
 
 
@@ -219,7 +259,11 @@ def _visual_line(visual: Visual) -> str:
         f"  - Animation: {_one_line(spec.animation_reason)}",
         f'  - After: "{_one_line(spec.anchor)}"',
     ]
-    if visual.animated:
+    if visual.raster_path:
+        lines.append(f"  - Rendered: {visual.raster_path} (the draft links this; upload it)")
+    elif visual.render_error:
+        lines.append(f"  - Not rendered: {_one_line(visual.render_error)} (draft links the SVG)")
+    if visual.animated and not visual.raster_path:
         lines.append("  - Substack shows SVG animation as a still: export a GIF to keep motion.")
     if visual.removed:
         lines.append(f"  - Sanitising removed: {', '.join(visual.removed)}")

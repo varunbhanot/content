@@ -255,3 +255,21 @@ def test_max_visuals_rejects_out_of_range(make_voice_dir: Callable[..., Path], v
     env = {**env, "NM_MAX_VISUALS": value}
     with pytest.raises(ConfigError, match="NM_MAX_VISUALS"):
         load_editor_settings(load_settings(env), env)
+
+
+def test_render_settings_default_on_with_playwright_browser(
+    make_voice_dir: Callable[..., Path],
+) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    editor = load_editor_settings(load_settings(env), env)
+    assert editor.render_visuals is True
+    assert editor.chromium_path == ""
+
+
+@pytest.mark.parametrize("value", ["false", "0", "no", "OFF"])
+def test_render_visuals_can_be_turned_off(make_voice_dir: Callable[..., Path], value: str) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    env = {**env, "NM_RENDER_VISUALS": value, "NM_CHROMIUM_PATH": " /opt/c "}
+    editor = load_editor_settings(load_settings(env), env)
+    assert editor.render_visuals is False
+    assert editor.chromium_path == "/opt/c"

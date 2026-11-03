@@ -38,6 +38,7 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(f"NM_{name.upper()}_MODEL", f"fake:{name}")
     monkeypatch.setenv("NM_MAX_REVISIONS", "1")
     monkeypatch.setenv("NM_ILLUSTRATOR_MODEL", "fake:illustrator")
+    monkeypatch.setenv("NM_RENDER_VISUALS", "false")  # tests opt in, with a fake browser
 
 
 def _use_models(
@@ -495,3 +496,49 @@ def test_issue_word_count_ignores_visuals(
     assert _from_fixtures(tmp_path, "--overwrite") == 0
     words = [line for line in plain.splitlines() if line.startswith("Wrote ") and "words" in line]
     assert words[0].split("(")[1] in capsys.readouterr().out
+
+
+class _FakeBrowser:
+    instances: list["_FakeBrowser"] = []
+
+    def __init__(self, executable_path: str | None = None) -> None:
+        self.executable_path = executable_path
+        self.closed = False
+        _FakeBrowser.instances.append(self)
+
+    def render(self, svg: str, *, animated: bool) -> Any:
+        from newsletter_machine.render import Raster
+
+        return Raster("png", b"\x89PNG fake")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_issue_renders_png_links_it_and_closes_the_browser(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("NM_RENDER_VISUALS", "true")
+    monkeypatch.setenv("NM_CHROMIUM_PATH", "/opt/chrome")
+    monkeypatch.setattr(cli_issue, "BrowserRenderer", _FakeBrowser)
+    _FakeBrowser.instances.clear()
+    _use_models(monkeypatch, illustrator=(illustrator_reply(VISUAL),))
+    assert _from_fixtures(tmp_path) == 0
+    assert "(issue.images/visual-1.png)" in (tmp_path / "issue.md").read_text()
+    assert (tmp_path / "issue.images" / "visual-1.png").read_bytes() == b"\x89PNG fake"
+    assert (tmp_path / "issue.images" / "visual-1.svg").exists()
+    [browser] = _FakeBrowser.instances
+    assert browser.executable_path == "/opt/chrome" and browser.closed
+    assert "1 rendered" in capsys.readouterr().out
+
+
+def test_issue_overwrite_clears_old_rendered_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _use_models(monkeypatch)
+    folder = tmp_path / "issue.images"
+    folder.mkdir()
+    for name in ("visual-1.png", "visual-2.gif", "hero.png"):
+        (folder / name).write_text("old")
+    assert _from_fixtures(tmp_path, "--overwrite") == 0
+    assert sorted(p.name for p in folder.iterdir()) == ["hero.png"]

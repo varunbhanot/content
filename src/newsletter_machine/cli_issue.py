@@ -78,6 +78,7 @@ from newsletter_machine.issue_output import (
     error_lines,
     render_notes,
 )
+from newsletter_machine.render import BrowserRenderer
 from newsletter_machine.researcher import build_researcher, researcher_system_prompt
 from newsletter_machine.sources import SourceDoc, parse_since
 from newsletter_machine.workspace import (
@@ -95,7 +96,7 @@ logger = logging.getLogger(__name__)
 NOTES_SUFFIX = ".notes.md"
 SOURCES_SUFFIX = ".sources"
 IMAGES_SUFFIX = ".images"
-OWN_VISUAL = re.compile(r"visual-\d+\.(?:svg|mmd)")  # only files the illustrator names
+OWN_VISUAL = re.compile(r"visual-\d+\.(?:svg|mmd|png|gif)")  # only files the illustrator names
 VISUALS_OFF = "- Visuals turned off (--no-visuals or NM_MAX_VISUALS=0)."
 
 
@@ -170,6 +171,8 @@ class _Agents:
     max_revisions: int
     illustrator: CompiledSubAgent | None  # None when visuals are off
     max_visuals: int
+    render_visuals: bool = False
+    chromium_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -205,6 +208,8 @@ def _build_agents(settings: Settings, *, visuals: bool = True) -> _Agents:
         max_revisions=editor.max_revisions,
         illustrator=illustrator,
         max_visuals=editor.max_visuals,
+        render_visuals=editor.render_visuals,
+        chromium_path=editor.chromium_path,
     )
 
 
@@ -347,6 +352,7 @@ def _illustrate(job: _Job, pipe: _Pipeline, draft: str) -> tuple[str, str]:
         return draft, f"- Could not clear old visuals: {exc}"
     if agents.illustrator is None:
         return draft, VISUALS_OFF
+    renderer = BrowserRenderer(agents.chromium_path or None) if agents.render_visuals else None
     try:
         result: Illustration = illustrate(
             agents.illustrator,
@@ -354,24 +360,32 @@ def _illustrate(job: _Job, pipe: _Pipeline, draft: str) -> tuple[str, str]:
             pipe.inputs.docs,
             max_visuals=agents.max_visuals,
             image_dir=job.paths.images.name,
+            renderer=renderer,
         )
         write_visuals(result, job.paths.images)
     except Exception as exc:  # network/API/model-output/write failures: visuals are optional
         logger.debug("Illustrator failed", exc_info=True)
         print(f"Illustrator failed: {exc} (draft kept without visuals)", file=sys.stderr)
         return draft, f"- Illustrator failed: {exc}"
+    finally:
+        if renderer is not None:
+            renderer.close()
     animated = sum(1 for v in result.visuals if v.animated)
+    rendered = sum(1 for v in result.visuals if v.raster is not None)
     print(
-        f"Visuals: {len(result.visuals)} placed ({animated} animated), "
+        f"Visuals: {len(result.visuals)} placed ({animated} animated, {rendered} rendered), "
         f"{len(result.rejected)} dropped -> {job.paths.images}"
     )
+    failed = [v for v in result.visuals if v.render_error]
+    if failed:
+        print(f"Rendering failed: {failed[0].render_error} (SVG linked instead)", file=sys.stderr)
     return result.draft, render_visual_notes(result)
 
 
 def _clear_images(images: Path) -> None:
     """Remove an earlier run's visuals (only reached under --overwrite or an empty folder).
 
-    Only ``visual-N.svg``/``.mmd`` files go: anything else Varun put there stays."""
+    Only ``visual-N.svg/.mmd/.png/.gif`` go: anything else Varun put there stays."""
     if images.is_dir():
         for old in images.iterdir():
             if OWN_VISUAL.fullmatch(old.name) and (old.is_file() or old.is_symlink()):

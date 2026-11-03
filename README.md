@@ -146,8 +146,13 @@ uv run newsletter-machine issue --since 7d --angle "evals are the moat" --out dr
   every SVG (no scripts, handlers or external links), names files `visual-N`, writes them to
   `drafts/2026-11-06.images/` and inserts each one after the paragraph it belongs to. The notes
   get a **Visuals** section: why each was chosen, why it is or is not animated, what was dropped.
-  Substack shows SVG animation as a still, so export a GIF if the motion matters. Skip it with
-  `--no-visuals`; if it fails, the draft is kept without visuals.
+  Each SVG is then rendered in headless Chromium to a **PNG** (static, 2x) or a looping
+  **GIF** (animated: one loop of the animation, capped at 6 s, at 12 fps), and the draft links that file, since Substack
+  takes neither SVG nor its animation; the SVG stays beside it as the editable source. Rendering
+  needs the `render` extra (`uv sync --extra render`, Playwright + Pillow) and a Chromium build
+  Playwright can launch (`NM_CHROMIUM_PATH` if it is not Playwright's own). If it cannot render,
+  the draft links the SVG and the notes say why. Mermaid stays inline as a code block. Skip
+  visuals with `--no-visuals`; if the illustrator fails, the draft is kept without visuals.
 - Exit codes: 0 done (or no links), 1 model/inbox/write failure (draft kept when only the
   critique or the illustrator fails), 2 config/usage error, always before any model call.
 
@@ -324,6 +329,8 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy src
 | `NM_MAX_REVISIONS` | `1` | Critique → revise loops per issue (0 to 3) |
 | `NM_ILLUSTRATOR_MODEL` | writer model | Illustrator model for `issue` (draws the SVG) |
 | `NM_MAX_VISUALS` | `3` | Most visuals per issue (0 to 5; 0 turns the illustrator off) |
+| `NM_RENDER_VISUALS` | `true` | Render SVGs to PNG/GIF in headless Chromium (needs `--extra render`) |
+| `NM_CHROMIUM_PATH` | Playwright's own | Chromium binary for rendering, when Playwright's build is missing |
 | `NM_VOICE_DIR` | `voice` | Voice corpus root (relative to cwd) |
 | `LOG_LEVEL` | `INFO` | Logging level |
 | `NM_GMAIL_LABEL` | `newsletter` | Gmail label the inbox filter applies |
