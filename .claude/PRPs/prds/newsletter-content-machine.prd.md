@@ -135,7 +135,7 @@ Manual (non-scheduled) run on one week's real links → one Markdown draft with 
 | 2 | Inbox & ingestion | Gmail-label inbox reader; article + YouTube transcript extraction | complete | with 3 | 1 | [plan](../plans/completed/phase-2-inbox-ingestion.plan.md), [report](../reports/phase-2-inbox-ingestion-report.md) |
 | 3 | Voice writer & critic | Writer + voice-critic sub-agents grounded in samples/style guide | complete | with 2 | 1 | [plan](../plans/completed/phase-3-voice-writer-critic.plan.md), [report](../reports/phase-3-voice-writer-critic-report.md) |
 | 4 | Editor orchestration (MVP) | Lead agent: plan → research → draft → critique → Markdown draft; manual run | complete | - | 2, 3 | [plan](../plans/completed/phase-4-editor-orchestration.plan.md), [report](../reports/phase-4-editor-orchestration-report.md) |
-| 5 | Schedule & delivery | Deploy to Managed Deep Agents with weekly cron; optional Substack draft | in-progress | - | 4 | - |
+| 5 | Schedule & delivery | Deploy to Managed Deep Agents with weekly cron; optional Substack draft | in-progress | - | 4 | [plan](../plans/phase-5-schedule-delivery.plan.md), [report](../reports/phase-5-schedule-delivery-report.md) |
 
 ### Phase Details
 
