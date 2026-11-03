@@ -23,6 +23,18 @@ uv sync
 cp .env.example .env   # then set ANTHROPIC_API_KEY
 ```
 
+Optional: to get the illustrator's diagrams as PNG/GIF files Substack accepts (instead of SVG
+links), install the `render` extra and a Chromium for Playwright once:
+
+```bash
+uv sync --extra render
+uv run playwright install chromium
+```
+
+If you already have a Chromium Playwright cannot find, skip the second command and set
+`NM_CHROMIUM_PATH` in `.env` to its binary. Without either, visuals are still made and linked
+as SVG; set `NM_RENDER_VISUALS=false` to skip rendering altogether.
+
 ## Run this week's issue
 
 The weekly manual run: reads the last 7 days of links from Gmail, then researches, drafts,
@@ -139,8 +151,22 @@ uv run newsletter-machine issue --since 7d --angle "evals are the moat" --out dr
 - Code, not the model, enforces the limits: one research pass, `1 + NM_MAX_REVISIONS` writer
   runs, one critique per draft version. If the editor skips the final critique, the command runs
   it. Nothing is sent, posted or scheduled.
+- Then an **illustrator** reads the final draft and decides which visuals, if any, earn their
+  place (up to `NM_MAX_VISUALS`, default 3): diagrams as SVG or Mermaid, charts as SVG (every
+  number must appear in the sources), and photo-style images as a ready-to-paste prompt for an
+  image tool. It animates (SVG SMIL) only when the point is motion or order. Code sanitises
+  every SVG (no scripts, handlers or external links), names files `visual-N`, writes them to
+  `drafts/2026-11-06.images/` and inserts each one after the paragraph it belongs to. The notes
+  get a **Visuals** section: why each was chosen, why it is or is not animated, what was dropped.
+  Each SVG is then rendered in headless Chromium to a **PNG** (static, 2x) or a looping
+  **GIF** (animated: one loop of the animation, capped at 6 s, at 12 fps), and the draft links that file, since Substack
+  takes neither SVG nor its animation; the SVG stays beside it as the editable source. Rendering
+  needs the `render` extra (`uv sync --extra render`, Playwright + Pillow) and a Chromium build
+  Playwright can launch (`NM_CHROMIUM_PATH` if it is not Playwright's own). If it cannot render,
+  the draft links the SVG and the notes say why. Mermaid stays inline as a code block. Skip
+  visuals with `--no-visuals`; if the illustrator fails, the draft is kept without visuals.
 - Exit codes: 0 done (or no links), 1 model/inbox/write failure (draft kept when only the
-  critique fails), 2 config/usage error, always before any model call.
+  critique or the illustrator fails), 2 config/usage error, always before any model call.
 
 | File | What it does |
 |---|---|
@@ -313,6 +339,10 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy src
 | `NM_CRITIC_MODEL` | writer model | Voice critic model |
 | `NM_EDITOR_MODEL` | writer model | Lead editor model for `issue` |
 | `NM_MAX_REVISIONS` | `1` | Critique → revise loops per issue (0 to 3) |
+| `NM_ILLUSTRATOR_MODEL` | writer model | Illustrator model for `issue` (draws the SVG) |
+| `NM_MAX_VISUALS` | `3` | Most visuals per issue (0 to 5; 0 turns the illustrator off) |
+| `NM_RENDER_VISUALS` | `true` | Render SVGs to PNG/GIF in headless Chromium (needs `--extra render`) |
+| `NM_CHROMIUM_PATH` | Playwright's own | Chromium binary for rendering, when Playwright's build is missing |
 | `NM_VOICE_DIR` | `voice` | Voice corpus root (relative to cwd) |
 | `LOG_LEVEL` | `INFO` | Logging level |
 | `NM_GMAIL_LABEL` | `newsletter` | Gmail label the inbox filter applies |

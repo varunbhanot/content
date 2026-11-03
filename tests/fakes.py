@@ -47,3 +47,10 @@ def task_call(subagent: str, description: str, call_id: str) -> AIMessage:
     """A lead-agent turn that delegates to ``subagent``."""
     args = {"description": description, "subagent_type": subagent}
     return AIMessage(content="", tool_calls=[{"name": "task", "args": args, "id": call_id}])
+
+
+def illustrator_reply(*visuals: dict[str, Any], skipped: str = "") -> AIMessage:
+    """A structured illustrator answer with ``visuals`` (none by default)."""
+    args = {"visuals": list(visuals), "skipped": skipped}
+    call = {"name": "IllustratorOutput", "args": args, "id": "i"}
+    return AIMessage(content="", tool_calls=[call])

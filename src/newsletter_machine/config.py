@@ -36,6 +36,8 @@ DEFAULT_TRANSCRIPT_LANGUAGES = "en"
 DEFAULT_GMAIL_ALLOWED_SENDERS = "me"
 DEFAULT_MAX_REVISIONS = 1
 MAX_REVISIONS_LIMIT = 3  # each revision is a writer + critic call; caps cost per issue
+DEFAULT_MAX_VISUALS = 3
+MAX_VISUALS_LIMIT = 5  # one illustrator call either way; this caps files and draft clutter
 SENDER_PATTERN = re.compile(r"[^\s{}()\"]+")
 
 
@@ -58,6 +60,10 @@ class EditorSettings:
 
     editor_model: str
     max_revisions: int
+    illustrator_model: str = ""
+    max_visuals: int = DEFAULT_MAX_VISUALS
+    render_visuals: bool = True  # SVG -> PNG/GIF in headless Chromium (the render extra)
+    chromium_path: str = ""  # blank = Playwright's own browser
 
 
 @dataclass(frozen=True)
@@ -122,16 +128,17 @@ def _require_provider_prefix(name: str, value: str) -> str:
     return value
 
 
-def _max_revisions(value: str) -> int:
+def _bounded_int(name: str, value: str, default: int, limit: int) -> int:
     value = value.strip()
     if not value:
-        return DEFAULT_MAX_REVISIONS
-    if not (value.isascii() and value.isdigit()) or int(value) > MAX_REVISIONS_LIMIT:
-        raise ConfigError(
-            f"NM_MAX_REVISIONS must be a whole number from 0 to {MAX_REVISIONS_LIMIT} "
-            f"(got {value!r})."
-        )
+        return default
+    if not (value.isascii() and value.isdigit()) or int(value) > limit:
+        raise ConfigError(f"{name} must be a whole number from 0 to {limit} (got {value!r}).")
     return int(value)
+
+
+def _max_revisions(value: str) -> int:
+    return _bounded_int("NM_MAX_REVISIONS", value, DEFAULT_MAX_REVISIONS, MAX_REVISIONS_LIMIT)
 
 
 def load_settings(
@@ -174,13 +181,28 @@ def load_settings(
 def load_editor_settings(
     settings: Settings, env: Mapping[str, str] | None = None
 ) -> EditorSettings:
-    """``NM_EDITOR_MODEL`` (blank = the writer model) and ``NM_MAX_REVISIONS`` (0 to 3)."""
+    """``NM_EDITOR_MODEL`` and ``NM_ILLUSTRATOR_MODEL`` (blank = the writer model),
+    ``NM_MAX_REVISIONS`` (0 to 3), ``NM_MAX_VISUALS`` (0 to 5, 0 = no illustrator),
+    ``NM_RENDER_VISUALS`` (default true) and ``NM_CHROMIUM_PATH`` (blank = Playwright's)."""
     env = _load_env(env)
     editor_model = _require_provider_prefix(
         "NM_EDITOR_MODEL", env.get("NM_EDITOR_MODEL", "").strip() or settings.writer_model
     )
+    illustrator_model = _require_provider_prefix(
+        "NM_ILLUSTRATOR_MODEL",
+        env.get("NM_ILLUSTRATOR_MODEL", "").strip() or settings.writer_model,
+    )
     return EditorSettings(
-        editor_model=editor_model, max_revisions=_max_revisions(env.get("NM_MAX_REVISIONS", ""))
+        editor_model=editor_model,
+        max_revisions=_max_revisions(env.get("NM_MAX_REVISIONS", "")),
+        illustrator_model=illustrator_model,
+        max_visuals=_bounded_int(
+            "NM_MAX_VISUALS", env.get("NM_MAX_VISUALS", ""), DEFAULT_MAX_VISUALS, MAX_VISUALS_LIMIT
+        ),
+        render_visuals=_flag(
+            "NM_RENDER_VISUALS", env.get("NM_RENDER_VISUALS", "").strip() or "true"
+        ),
+        chromium_path=env.get("NM_CHROMIUM_PATH", "").strip(),
     )
 
 

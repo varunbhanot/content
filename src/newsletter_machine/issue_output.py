@@ -102,6 +102,7 @@ class NotesInput:
     summary: str
     dropped: tuple[str, ...]
     final_summary: Mapping[str, Any] | None = None  # the final version's critique counts
+    visuals: str = ""  # the illustrator's report; empty when it never ran
 
 
 def critique_summary(files: Files, version: int) -> dict[str, Any] | None:
@@ -174,6 +175,7 @@ def render_notes(notes: NotesInput) -> str:
         _section("Editor's summary", notes.summary or "(no summary)"),
         _section("Run log", "\n".join(run_log)),
         _section("Sources", "\n".join(_source_lines(notes.docs, notes.dropped))),
+        *([_section("Visuals", notes.visuals)] if notes.visuals else []),
         _section("Source numbers ([n] in the plan, briefs and notes)", _numbers(notes.docs)),
         _section("Plan", file_text(files, PLAN_FILE) or "(no plan written)"),
         _section("Final brief", brief or "(no brief)"),

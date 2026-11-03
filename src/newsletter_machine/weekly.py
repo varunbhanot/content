@@ -84,7 +84,13 @@ def issue_date(now: datetime, timezone: ZoneInfo) -> date:
 def issue_args(out: Path, *, overwrite: bool = False) -> argparse.Namespace:
     """The arguments ``issue --out OUT`` parses to: Gmail links, default window, no angle."""
     return argparse.Namespace(
-        out=out, angle=None, sources=None, links_file=None, since=None, overwrite=overwrite
+        out=out,
+        angle=None,
+        sources=None,
+        links_file=None,
+        since=None,
+        overwrite=overwrite,
+        no_visuals=False,
     )
 
 

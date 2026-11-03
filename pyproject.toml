@@ -24,11 +24,17 @@ dependencies = [
     "youtube-transcript-api>=1.2.4",
 ]
 
+[project.optional-dependencies]
+# renders the illustrator's SVGs to PNG/GIF for Substack; without it the draft links the SVG
+render = ["playwright>=1.50", "pillow>=11"]
+
 [project.scripts]
 newsletter-machine = "newsletter_machine.cli:main"
 
 [dependency-groups]
 dev = [
+    "playwright>=1.50",
+    "pillow>=11",
     "pytest",
     "pytest-cov",
     "ruff",
