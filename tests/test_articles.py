@@ -36,7 +36,7 @@ def test_extract_article_marks_fetch_error_as_failed() -> None:
     doc = extract_article(LINK, fail)
     assert doc.status == "failed"
     assert doc.detail == "HTTP 403"
-    assert doc.title == LINK.url
+    assert doc.title == LINK.note  # page title unknown: use Varun's note
     assert doc.text == ""
 
 
