@@ -4,7 +4,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from newsletter_machine.ingest import check_out_dir, ingest_links, slugify, write_sources
+from newsletter_machine.ingest import (
+    check_out_dir,
+    ingest_links,
+    read_sources,
+    render_source,
+    slugify,
+    write_sources,
+)
 from newsletter_machine.sources import InboxLink, SourceDoc
 
 WHEN = datetime(2026, 11, 1, tzinfo=UTC)
@@ -166,3 +173,59 @@ def test_write_sources_leaves_previous_output_intact_when_a_write_fails(
     monkeypatch.undo()
     assert sorted(p.name for p in tmp_path.iterdir()) == ["01-old.md"]
     assert (tmp_path / "01-old.md").read_text() == PREVIOUS
+
+
+def _source(title: str, status: str = "ok", text: str = "Body.\n\nMore body.") -> SourceDoc:
+    return SourceDoc(
+        url=f"https://example.com/{slugify(title)}",
+        title=title,
+        kind="article",
+        status=status,  # type: ignore[arg-type]
+        text=text,
+        note="my note",
+        detail="",
+    )
+
+
+def test_read_sources_round_trips_written_files(tmp_path: Path) -> None:
+    docs = (_source("First: a title"), _source("Second", status="failed", text=""))
+    write_sources(docs, tmp_path)
+    assert read_sources(tmp_path) == docs
+
+
+def test_read_sources_ignores_other_files(tmp_path: Path) -> None:
+    write_sources((_source("Only"),), tmp_path)
+    (tmp_path / "notes.md").write_text("mine")
+    (tmp_path / "99-not-ingest.md").write_text("no front matter")
+    assert [d.title for d in read_sources(tmp_path)] == ["Only"]
+
+
+def test_read_sources_rejects_missing_dir(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="not a directory"):
+        read_sources(tmp_path / "nope")
+
+
+def test_read_sources_rejects_dir_without_sources(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="no ingested source files"):
+        read_sources(tmp_path)
+
+
+def test_read_sources_rejects_bad_kind(tmp_path: Path) -> None:
+    text = render_source(_source("Bad")).replace("kind: article", "kind: podcast")
+    (tmp_path / "01-bad.md").write_text(text)
+    with pytest.raises(ValueError, match="01-bad.md.*kind"):
+        read_sources(tmp_path)
+
+
+def test_read_sources_rejects_missing_field(tmp_path: Path) -> None:
+    text = render_source(_source("Bad")).replace("status: ok\n", "")
+    (tmp_path / "01-bad.md").write_text(text)
+    with pytest.raises(ValueError, match="01-bad.md.*status"):
+        read_sources(tmp_path)
+
+
+def test_read_sources_orders_numerically_past_99(tmp_path: Path) -> None:
+    for index in (100, 11, 2):
+        doc = _source(f"Doc {index}")
+        (tmp_path / f"{index:02d}-doc.md").write_text(render_source(doc))
+    assert [d.title for d in read_sources(tmp_path)] == ["Doc 2", "Doc 11", "Doc 100"]

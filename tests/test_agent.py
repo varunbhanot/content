@@ -94,3 +94,15 @@ def test_hello_agent_live_cites_hand_post(real_settings: Settings) -> None:
     titles = [s.title.lower() for s in load_voice_corpus(real_settings.voice_dir, era="hand")]
     assert any(t[:20] in text for t in titles)
     assert _hash_tree(real_settings.voice_dir) == before
+
+
+def test_make_chat_model_passes_anthropic_key_only_to_anthropic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from newsletter_machine import agent
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(agent, "init_chat_model", lambda m, **kw: calls.append((m, kw)))
+    agent.make_chat_model("anthropic:a", "secret")
+    agent.make_chat_model("openai:b", "secret")
+    assert calls == [("anthropic:a", {"api_key": "secret"}), ("openai:b", {})]

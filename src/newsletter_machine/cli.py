@@ -1,26 +1,40 @@
-"""Command-line entry point: ``newsletter-machine hello`` and ``newsletter-machine ingest``."""
+"""Command-line entry point: ``newsletter-machine hello``, ``ingest`` and ``draft``."""
 
 import argparse
 import logging
 import os
 import sys
 from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
-from newsletter_machine.agent import build_hello_agent
+from newsletter_machine.agent import build_hello_agent, extract_text, make_chat_model
 from newsletter_machine.browser_fetch import make_browser_fetcher
+from newsletter_machine.checklist import Checklist
+from newsletter_machine.checks import prose_words
 from newsletter_machine.config import (
     ConfigError,
     IngestSettings,
     load_ingest_settings,
     load_settings,
 )
+from newsletter_machine.critic import critic_task, run_critic
+from newsletter_machine.critique_report import ReportMeta, render_critique
+from newsletter_machine.drafting import (
+    OutputPaths,
+    SubAgents,
+    build_subagents,
+    check_outputs,
+    output_paths,
+    write_atomic,
+)
 from newsletter_machine.gmail import build_gmail_client, read_inbox_links
-from newsletter_machine.ingest import check_out_dir, ingest_links, write_sources
+from newsletter_machine.grounding import load_grounding
+from newsletter_machine.ingest import check_out_dir, ingest_links, read_sources, write_sources
 from newsletter_machine.sources import InboxLink, SourceDoc, parse_since, read_links_file
 from newsletter_machine.web import make_html_fetcher, with_fallback
+from newsletter_machine.writer import run_writer, usable_sources, writer_task
 from newsletter_machine.youtube import make_transcript_fetcher
 
 logger = logging.getLogger(__name__)
@@ -33,17 +47,6 @@ DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_SINCE = "7d"
 EXIT_ERROR = 1
 EXIT_CONFIG = 2
-
-
-def extract_text(content: Any) -> str:
-    """Flatten Anthropic message content (str or list of blocks) to plain text."""
-    if isinstance(content, str):
-        return content
-    return "".join(
-        block.get("text", "")
-        for block in content
-        if isinstance(block, dict) and block.get("type") == "text"
-    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -60,6 +63,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ingest.add_argument(
         "--overwrite", action="store_true", help="Replace Markdown files already in --out"
     )
+    draft = sub.add_parser("draft", help="Write a draft in Varun's voice, then critique it once")
+    draft.add_argument("--sources", required=True, type=Path, help="Folder written by 'ingest'")
+    draft.add_argument("--angle", help="Your topic or argument in a line (optional)")
+    draft.add_argument(
+        "--out", required=True, type=Path, help="Draft file (.md); critique beside it"
+    )
+    draft.add_argument("--overwrite", action="store_true", help="Replace existing draft/critique")
     return parser
 
 
@@ -167,8 +177,105 @@ def _run_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+@dataclass(frozen=True)
+class _DraftJob:
+    docs: tuple[SourceDoc, ...]
+    checklist: Checklist
+    paths: OutputPaths
+    task: str
+    agents: SubAgents
+
+
+def _prepare_draft(args: argparse.Namespace) -> _DraftJob:
+    """Everything that can fail before a model call (exit 2): settings, sources, voice, out."""
+    settings = load_settings()
+    _configure_logging()
+    paths = output_paths(args.out)
+    check_outputs(paths, overwrite=args.overwrite)
+    docs = read_sources(args.sources)
+    task = writer_task(docs, args.angle)
+    grounding = load_grounding(settings.voice_dir)
+    key = settings.anthropic_api_key
+    agents = build_subagents(
+        grounding,
+        make_chat_model(settings.writer_model, key),
+        make_chat_model(settings.critic_model, key),
+    )
+    return _DraftJob(docs, grounding.checklist, paths, task, agents)
+
+
+def _report_meta(job: _DraftJob, words: int) -> ReportMeta:
+    return ReportMeta(
+        draft_name=job.paths.draft.name,
+        words=words,
+        writer_version=job.agents.writer_version,
+        critic_version=job.agents.critic_version,
+        checklist_version=job.checklist.version,
+    )
+
+
+def _save_draft(job: _DraftJob, draft: str, words: int) -> int:
+    """Write the draft, then drop any critique left from an earlier run (it no longer matches)."""
+    try:
+        write_atomic(job.paths.draft, f"{draft.rstrip()}\n")
+        job.paths.critique.unlink(missing_ok=True)
+    except OSError as exc:
+        print(f"Could not write the draft: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    print(f"Wrote {job.paths.draft} ({words} words)")
+    return 0
+
+
+def _critique_draft(job: _DraftJob, draft: str, words: int) -> int:
+    """Run the critic on a saved draft; any failure keeps the draft."""
+    try:
+        critique = run_critic(job.agents.critic, critic_task(draft, job.docs), job.checklist, draft)
+    except Exception as exc:  # network/API failures surface as many types
+        logger.debug("Critic run failed", exc_info=True)
+        print(f"Critic failed: {exc} (draft kept at {job.paths.draft})", file=sys.stderr)
+        return EXIT_ERROR
+    try:
+        write_atomic(job.paths.critique, render_critique(critique, _report_meta(job, words)))
+    except OSError as exc:
+        print(f"Could not write the critique: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    print(
+        f"Critique: {critique.passed} passed, {critique.failed} failed, "
+        f"{critique.not_checked} not checked -> {job.paths.critique}"
+    )
+    return 0
+
+
+def _sources_line(docs: tuple[SourceDoc, ...]) -> str:
+    usable = len(usable_sources(docs))
+    skipped = len(docs) - usable
+    plural = "source" if skipped == 1 else "sources"
+    suffix = f" ({skipped} failed {plural} skipped)" if skipped else ""
+    return f"Using {usable} of {len(docs)} sources{suffix}"
+
+
+def _run_draft(args: argparse.Namespace) -> int:
+    try:
+        job = _prepare_draft(args)
+    except (ConfigError, ValueError, KeyError, OSError, ImportError) as exc:
+        # settings, sources, voice files, prompts, --out, model provider package missing
+        print(f"Config error: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    print(_sources_line(job.docs))
+    try:
+        draft = run_writer(job.agents.writer, job.task)
+    except Exception as exc:  # network/API failures surface as many types
+        logger.debug("Writer run failed", exc_info=True)
+        print(f"Writer failed: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    words = prose_words(draft)
+    return _save_draft(job, draft, words) or _critique_draft(job, draft, words)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.command == "ingest":
         return _run_ingest(args)
+    if args.command == "draft":
+        return _run_draft(args)
     return _run_hello(args.question)

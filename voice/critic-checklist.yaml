@@ -1,0 +1,168 @@
+# Voice-critic checklist, derived from voice/style-guide.md.
+#
+# Varun: edit freely. The critic (and the writer, as a target) reads this file on every run.
+# Each item must cite a "## " section of the style guide in `section`; the loader refuses
+# items whose section does not exist, so the two files cannot drift apart silently.
+#
+# Fields
+#   id        short kebab-case name, unique
+#   section   the style-guide H2 this rule comes from
+#   rule      the rule as an instruction to the writer ("Do not ...", "Keep ...")
+#   check     what the critic looks for, and what counts as a fail
+#   severity  must | should   (should = flag it, but it may be a deliberate choice)
+# Optional, checked by code instead of the model (exact, no judgement):
+#   patterns             regexes (case-insensitive); each match is a hit
+#   word_range           [min, max] words in the draft body (Sources list excluded)
+#   max_paragraph_chars  paragraphs longer than this are hits
+#   allowed              hits allowed before the item fails (default 0)
+
+version: 1
+items:
+  - id: practitioner-first-person
+    section: Who's talking
+    rule: First person, a practitioner who builds this, not a commentator.
+    check: >-
+      Fail if the draft reads as detached commentary ("organisations are...", "experts say")
+      with no "I" or "we" grounded in building or running the thing. Fail if it invents
+      personal experiences that are not in the sources or the angle.
+    severity: must
+
+  - id: opening-move
+    section: Openings
+    rule: >-
+      Open with a blunt claim the reader half-knows, a scene, a number or a question,
+      then name a symptom the reader will recognise.
+    check: >-
+      Fail if the first paragraph is throat-clearing, a definition, a history lesson or a
+      generic "In today's fast-moving world" framing. Quote the first sentence.
+    severity: must
+
+  - id: no-uncomfortable-truth-default
+    section: Openings
+    rule: Do not default to "Here's the uncomfortable truth".
+    check: Any use of "uncomfortable truth" is flagged; Varun decides if it earns its place.
+    severity: should
+    patterns: ['uncomfortable truths?']
+
+  - id: short-landing-sentences
+    section: Rhythm
+    rule: Setup, then a short sentence that lands it. One-line paragraphs for the punch.
+    check: >-
+      Fail if there are no short pivot sentences ("This works for demos. It breaks in
+      production.") or if long explanatory sentences are stacked three or more in a row.
+      Quote the worst stack.
+    severity: must
+
+  - id: voice-devices
+    section: Devices
+    rule: >-
+      Use his devices where they fit: everyday analogy, before/after contrast, Step N
+      walkthroughs, a block-quote pull-line, bold lead-ins on bullets, "you" and
+      rhetorical questions.
+    check: >-
+      Fail if none of these devices appear. Also fail if a device is forced (an analogy
+      that does not clarify anything).
+    severity: should
+
+  - id: one-topic
+    section: Structure and length
+    rule: One topic per post.
+    check: Fail if the draft covers several unrelated topics instead of one argument.
+    severity: must
+
+  - id: length
+    section: Structure and length
+    rule: Hand posts run about 550 to 1,400 words, most 650 to 950. Do not pad.
+    check: Word count of the draft body, Sources list excluded.
+    severity: must
+    word_range: [550, 1400]
+
+  - id: plain-headings
+    section: Structure and length
+    rule: H2 sections with plain, claim-like or question headings.
+    check: >-
+      Fail if headings are clever-but-vague labels ("The Paradigm Shift", "Unlocking
+      Value") rather than claims or questions, or if there are no H2 sections at all.
+    severity: should
+
+  - id: concrete-early
+    section: Structure and length
+    rule: A concrete example or number early (a real app, a real failure), not abstract framing.
+    check: Fail if the first three paragraphs contain no concrete example, number or named system.
+    severity: must
+
+  - id: bullets-for-lists
+    section: Structure and length
+    rule: Bullets for lists of three or more items; prose for argument.
+    check: >-
+      Fail if an argument is chopped into bullets, or a list of three or more parallel
+      items is crammed into one sentence.
+    severity: should
+
+  - id: short-closing
+    section: Closings
+    rule: Short and plain. Restate the shift in one or two sentences, then stop or point forward.
+    check: >-
+      Fail if the ending is a long recap, a "In conclusion"/"To sum up" summary, or a list
+      of takeaways repeating the body. Quote the closing.
+    severity: must
+
+  - id: demo-vs-production
+    section: Closings
+    rule: Keep his recurring theme where it fits naturally, demo vs production.
+    check: Flag if the draft never connects its point to what works in production versus in a demo.
+    severity: should
+
+  - id: no-quietly
+    section: Avoid
+    rule: 'Do not use "quietly" as a drama word (quietly breaks, quietly fades); once at most.'
+    check: Count of "quietly".
+    severity: should
+    patterns: ['\bquietly\b']
+    allowed: 1
+
+  - id: no-buried-or-fanfare
+    section: Avoid
+    rule: 'Do not use "buried" or "without fanfare"; they appear only in AI-assisted posts.'
+    check: Any use is a hit.
+    severity: must
+    patterns: ['\bburied\b', 'without fanfare']
+
+  - id: no-formal-recap
+    section: Avoid
+    rule: >-
+      Do not open with a formal series recap ("In Part 1 we argued... In Part 2 we
+      mapped..."). A recap is one clause ("Last time we talked about...").
+    check: Fail if any recap of earlier posts runs longer than one clause.
+    severity: must
+
+  - id: short-paragraphs
+    section: Avoid
+    rule: Keep paragraphs short; break up any paragraph over 400 characters.
+    check: Paragraphs over 400 characters (one is tolerated).
+    severity: must
+    max_paragraph_chars: 400
+    allowed: 1
+
+  - id: no-vendor-brochure
+    section: Avoid
+    rule: Do not use vendor-brochure phrases ("revolutionizing", "enterprise-grade", "game-changing").
+    check: Any use is a hit.
+    severity: must
+    patterns: ['revolutioni[sz]', 'enterprise-grade', 'game[- ]chang']
+
+  - id: no-invented-facts
+    section: Avoid
+    rule: Do not invent statistics or anecdotes the sources do not contain.
+    check: >-
+      Compare every number, percentage, named company result, quote and anecdote in the
+      draft with the sources. Fail on anything not supported by them; quote it.
+    severity: must
+
+  - id: no-em-dashes
+    section: Avoid
+    rule: >-
+      Do not use em dashes. Use a comma, a full stop, a colon or parentheses instead.
+    check: Any em dash (or a spaced en dash / double hyphen used as one) is a hit.
+    severity: must
+    patterns: ['—', ' – ', ' -- ']

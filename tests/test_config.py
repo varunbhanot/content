@@ -15,6 +15,31 @@ def test_load_settings_returns_settings_with_defaults(make_voice_dir: Callable[.
     assert settings.voice_dir == voice
 
 
+def test_critic_model_defaults_to_writer_model(make_voice_dir: Callable[..., Path]) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    settings = load_settings({**env, "NM_WRITER_MODEL": "anthropic:w"})
+    assert settings.critic_model == "anthropic:w"
+
+
+def test_blank_critic_model_falls_back_to_writer_model(
+    make_voice_dir: Callable[..., Path],
+) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    settings = load_settings({**env, "NM_WRITER_MODEL": "anthropic:w", "NM_CRITIC_MODEL": " "})
+    assert settings.critic_model == "anthropic:w"
+
+
+def test_critic_model_can_be_set(make_voice_dir: Callable[..., Path]) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    assert load_settings({**env, "NM_CRITIC_MODEL": "anthropic:c"}).critic_model == "anthropic:c"
+
+
+def test_critic_model_requires_provider_prefix(make_voice_dir: Callable[..., Path]) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    with pytest.raises(ConfigError, match="NM_CRITIC_MODEL"):
+        load_settings({**env, "NM_CRITIC_MODEL": "c"})
+
+
 def test_load_settings_raises_when_api_key_missing(make_voice_dir: Callable[..., Path]) -> None:
     voice = make_voice_dir()
     with pytest.raises(ConfigError, match=r"\.env\.example"):
@@ -133,3 +158,13 @@ def test_load_ingest_settings_parses_allowed_senders(tmp_path: Path) -> None:
 def test_load_ingest_settings_rejects_bad_allowed_senders(value: str, tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="NM_GMAIL_ALLOWED_SENDERS"):
         load_ingest_settings({"NM_GMAIL_ALLOWED_SENDERS": value}, repo_root=tmp_path)
+
+
+def test_model_settings_are_stripped(make_voice_dir: Callable[..., Path]) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    settings = load_settings({**env, "NM_WRITER_MODEL": " anthropic:w ", "NM_FAST_MODEL": "a:f "})
+    assert (settings.writer_model, settings.critic_model, settings.fast_model) == (
+        "anthropic:w",
+        "anthropic:w",
+        "a:f",
+    )

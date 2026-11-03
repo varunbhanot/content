@@ -9,17 +9,21 @@ import unicodedata
 from collections.abc import Iterable
 from dataclasses import asdict
 from pathlib import Path
+from typing import get_args
 
 import yaml
 
 from newsletter_machine.articles import extract_article
+from newsletter_machine.frontmatter import split_front_matter
 from newsletter_machine.sources import (
     InboxLink,
     SourceDoc,
     SourceKind,
+    SourceStatus,
     failed_doc,
     youtube_video_id,
 )
+from newsletter_machine.validation import one_of
 from newsletter_machine.web import HtmlFetcher
 from newsletter_machine.youtube import TranscriptFetcher, ingest_youtube
 
@@ -139,3 +143,31 @@ def write_sources(
         stale.unlink()
     logger.info("Wrote %d source files to %s", len(paths), out_dir)
     return paths
+
+
+def _parse_source(path: Path) -> SourceDoc:
+    meta, body = split_front_matter(path, path.read_text(encoding="utf-8"))
+    missing = [name for name in FRONT_MATTER_FIELDS if name not in meta]
+    if missing:
+        raise ValueError(f"{path}: front-matter missing {missing}")
+    heading, _, text = body.partition("\n")
+    return SourceDoc(
+        url=str(meta["url"]),
+        title=str(meta["title"]),
+        kind=one_of(str(path), "kind", meta["kind"], get_args(SourceKind)),
+        status=one_of(str(path), "status", meta["status"], get_args(SourceStatus)),
+        text=text.strip("\n") if heading.startswith("# ") else body,
+        note=str(meta["note"] or ""),
+        detail=str(meta["detail"] or ""),
+    )
+
+
+def read_sources(source_dir: Path) -> tuple[SourceDoc, ...]:
+    """Read back the ``NN-<slug>.md`` files ``write_sources`` wrote, in numeric order."""
+    if not source_dir.is_dir():
+        raise ValueError(f"--sources {source_dir} is not a directory.")
+    paths = _previous_output(source_dir)
+    if not paths:
+        raise ValueError(f"{source_dir} has no ingested source files (NN-<slug>.md).")
+    ordered = sorted(paths, key=lambda path: (int(path.name.split("-", 1)[0]), path.name))
+    return tuple(_parse_source(path) for path in ordered)
