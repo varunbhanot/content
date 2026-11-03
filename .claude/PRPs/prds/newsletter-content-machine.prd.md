@@ -135,7 +135,7 @@ Manual (non-scheduled) run on one week's real links → one Markdown draft with 
 | 2 | Inbox & ingestion | Gmail-label inbox reader; article + YouTube transcript extraction | complete | with 3 | 1 | [plan](../plans/completed/phase-2-inbox-ingestion.plan.md), [report](../reports/phase-2-inbox-ingestion-report.md) |
 | 3 | Voice writer & critic | Writer + voice-critic sub-agents grounded in samples/style guide | complete | with 2 | 1 | [plan](../plans/completed/phase-3-voice-writer-critic.plan.md), [report](../reports/phase-3-voice-writer-critic-report.md) |
 | 4 | Editor orchestration (MVP) | Lead agent: plan → research → draft → critique → Markdown draft; manual run | complete | - | 2, 3 | [plan](../plans/completed/phase-4-editor-orchestration.plan.md), [report](../reports/phase-4-editor-orchestration-report.md) |
-| 5 | Schedule & delivery | Deploy to Managed Deep Agents with weekly cron; optional Substack draft | in-progress | - | 4 | [plan](../plans/phase-5-schedule-delivery.plan.md), [report](../reports/phase-5-schedule-delivery-report.md) |
+| 5 | Schedule & delivery | Deploy to Managed Deep Agents with weekly cron; optional Substack draft | complete | - | 4 | [plan](../plans/completed/phase-5-schedule-delivery.plan.md), [report](../reports/phase-5-schedule-delivery-report.md) |
 
 ### Phase Details
 
@@ -177,6 +177,7 @@ Phases 2 and 3 are independent once the foundation exists - ingestion produces t
 | Approval model | Agents draft, Varun approves | Fully automatic | Final opinions are his; protects voice |
 | Framework | LangChain `deepagents` (Python) | Claude Agent SDK, custom | Owner wants to learn deep agents; planning/sub-agents/filesystem built in |
 | Hosting | LangSmith Managed Deep Agents (free tier) | Laptop cron, GitHub Actions | Owner's choice; local-first until validated |
+| Hosting (2026-11-03) | Laptop scheduler (launchd/cron) running `newsletter-machine weekly` | Managed Deep Agents (deploy files kept in repo) | MDA cron needs LangSmith Plus ($39/seat/month), over budget; owner wants to run locally and pay nothing beyond API usage for now |
 | Link inbox | Gmail: email links to `varunbhanot+newsletter@gmail.com` (filter → label) | Notion, Telegram bot, repo file | "Most convenient, nothing fancy": works from any phone/desktop share sheet, no new app or bot |
 | v1 output | Markdown draft + sources | Direct Substack draft | No official Substack API; unofficial one may break |
 | Evals | Deferred | DeepEval | Owner: "forget evals for now" |

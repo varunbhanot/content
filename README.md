@@ -164,7 +164,58 @@ and does not stop delivery. Settings: `SUBSTACK_PUBLICATION_URL` plus `SUBSTACK_
 (recommended: the `substack.sid=...` cookie string from a signed-in browser) or
 `SUBSTACK_EMAIL` and `SUBSTACK_PASSWORD`.
 
-### Runbook: deploy to LangSmith Managed Deep Agents
+### Runbook: run it on your laptop (free)
+
+The default for now: no LangSmith plan, no hosting bill. Your laptop runs `weekly` on a
+schedule; the only cost is the Anthropic API usage of each issue. The laptop must be on (or
+wake) at run time.
+
+1. Do steps 1 to 4 of the Managed Deep Agents runbook below (Google *In production*,
+   `gmail-auth`, `NM_GMAIL_TOKEN_B64` in `.env`, one manual `weekly` run). With the token in
+   `.env`, a scheduled run never waits on a browser: a bad token exits 2 at once.
+2. **Schedule it.**
+
+   - **macOS (launchd, recommended):** a job missed while the Mac slept runs when it wakes.
+     Save as `~/Library/LaunchAgents/com.varun.newsletter-weekly.plist`, with your repo path and
+     `which uv` output filled in:
+
+     ```xml
+     <?xml version="1.0" encoding="UTF-8"?>
+     <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+     <plist version="1.0"><dict>
+       <key>Label</key><string>com.varun.newsletter-weekly</string>
+       <key>WorkingDirectory</key><string>/path/to/content</string>
+       <key>ProgramArguments</key><array>
+         <string>/path/to/uv</string><string>run</string>
+         <string>newsletter-machine</string><string>weekly</string>
+         <string>--out-dir</string><string>drafts</string>
+       </array>
+       <key>StartCalendarInterval</key><dict>
+         <key>Weekday</key><integer>5</integer>
+         <key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer>
+       </dict>
+       <key>StandardOutPath</key><string>/path/to/content/drafts/weekly.log</string>
+       <key>StandardErrorPath</key><string>/path/to/content/drafts/weekly.log</string>
+     </dict></plist>
+     ```
+
+     ```bash
+     launchctl load ~/Library/LaunchAgents/com.varun.newsletter-weekly.plist
+     ```
+
+     Stop it with `launchctl unload` on the same file.
+
+   - **Linux (cron):** a run missed while the laptop is off is skipped. `crontab -e`, then add
+     (times are the laptop's local time):
+
+     ```
+     0 7 * * 5 cd /path/to/content && /path/to/uv run newsletter-machine weekly --out-dir drafts >> drafts/weekly.log 2>&1
+     ```
+
+3. **Check** Friday morning: "Newsletter draft: ..." in your inbox, files in `drafts/`, and
+   `drafts/weekly.log` if nothing arrived.
+
+### Runbook: deploy to LangSmith Managed Deep Agents (later, paid)
 
 The repo root is a Managed Deep Agents (MDA) project: `agent.py` (a small runner agent whose
 only tool, `run_weekly_issue`, runs the same code as `weekly`), `instructions.md` (its prompt),
