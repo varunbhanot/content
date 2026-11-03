@@ -8,15 +8,19 @@ import pytest
 from dotenv import dotenv_values
 
 from newsletter_machine.articles import extract_article
+from newsletter_machine.browser_fetch import make_browser_fetcher
 from newsletter_machine.config import IngestSettings, load_ingest_settings
 from newsletter_machine.gmail import build_gmail_client, read_inbox_links
 from newsletter_machine.sources import InboxLink
-from newsletter_machine.web import make_html_fetcher
+from newsletter_machine.web import make_html_fetcher, with_fallback
 from newsletter_machine.youtube import ingest_youtube, make_transcript_fetcher
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LIVE_ENV = {**dotenv_values(REPO_ROOT / ".env"), **os.environ}
 CAPTIONED_VIDEO_ID = "zjkBMFhNj_g"  # Andrej Karpathy, "Intro to Large Language Models"
+CLOUDFLARE_ARTICLE = (
+    "https://commandline.microsoft.com/agentic-software-engineering"  # refuses plain httpx
+)
 NOW = datetime.now(UTC)
 
 
@@ -36,6 +40,18 @@ def test_live_article_fetch_extracts_text(live_settings: IngestSettings) -> None
     doc = extract_article(_link("https://en.wikipedia.org/wiki/Software_agent"), fetch)
     assert doc.status == "ok", doc.detail
     assert "agent" in doc.text.lower()
+
+
+@pytest.mark.live
+def test_live_cloudflare_site_via_browser_fallback(live_settings: IngestSettings) -> None:
+    """A site that refuses plain Python clients (Cloudflare) is read via the browser retry."""
+    fetch = with_fallback(
+        make_html_fetcher(live_settings.fetch_timeout),
+        make_browser_fetcher(live_settings.fetch_timeout),
+    )
+    doc = extract_article(_link(CLOUDFLARE_ARTICLE), fetch)
+    assert doc.status == "ok", doc.detail
+    assert len(doc.text) > 1000
 
 
 @pytest.mark.live

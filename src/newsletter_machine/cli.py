@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from newsletter_machine.agent import build_hello_agent
+from newsletter_machine.browser_fetch import make_browser_fetcher
 from newsletter_machine.config import (
     ConfigError,
     IngestSettings,
@@ -19,7 +20,7 @@ from newsletter_machine.config import (
 from newsletter_machine.gmail import build_gmail_client, read_inbox_links
 from newsletter_machine.ingest import check_out_dir, ingest_links, write_sources
 from newsletter_machine.sources import InboxLink, SourceDoc, parse_since, read_links_file
-from newsletter_machine.web import make_html_fetcher
+from newsletter_machine.web import make_html_fetcher, with_fallback
 from newsletter_machine.youtube import make_transcript_fetcher
 
 logger = logging.getLogger(__name__)
@@ -149,7 +150,10 @@ def _run_ingest(args: argparse.Namespace) -> int:
         return 0
     docs = ingest_links(
         links,
-        fetch_html=make_html_fetcher(settings.fetch_timeout),
+        fetch_html=with_fallback(
+            make_html_fetcher(settings.fetch_timeout),
+            make_browser_fetcher(settings.fetch_timeout),
+        ),
         fetch_transcript=make_transcript_fetcher(
             settings.transcript_languages, timeout=settings.fetch_timeout
         ),

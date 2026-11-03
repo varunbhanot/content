@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,7 @@ from newsletter_machine import cli, config
 from newsletter_machine.cli import main
 from newsletter_machine.gmail import GmailError
 from newsletter_machine.sources import InboxLink
-from newsletter_machine.web import FetchError
+from newsletter_machine.web import BlockedError, FetchError
 
 PREVIOUS = "---\nurl: https://old.example.com\n---\n"
 ARTICLE_HTML = (
@@ -19,6 +20,22 @@ ARTICLE_HTML = (
 )
 
 
+BROWSER_CALLS: list[str] = []
+
+
+def _record_browser_use(url: str) -> str:
+    BROWSER_CALLS.append(url)
+    return ARTICLE_HTML
+
+
+@pytest.fixture(autouse=True)
+def _no_unexpected_browser_fallback() -> Iterator[None]:
+    """Tests that do not stub a refusal must never reach the browser fallback."""
+    BROWSER_CALLS.clear()
+    yield
+    assert BROWSER_CALLS == []
+
+
 @pytest.fixture(autouse=True)
 def _hermetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No real .env, no network: fake fetchers, cwd in a temp dir."""
@@ -26,6 +43,7 @@ def _hermetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(cli, "make_html_fetcher", lambda timeout: lambda url: ARTICLE_HTML)
+    monkeypatch.setattr(cli, "make_browser_fetcher", lambda timeout: _record_browser_use)
     monkeypatch.setattr(
         cli, "make_transcript_fetcher", lambda languages, timeout: lambda video_id: "spoken words"
     )
@@ -42,6 +60,20 @@ def test_ingest_from_links_file_writes_one_file_per_source(
     stdout = capsys.readouterr().out
     assert "Wrote 2 files" in stdout
     assert "2 ok, 0 fallback, 0 failed" in stdout
+
+
+def test_ingest_retries_refused_pages_with_browser_fetcher(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def refused(url: str) -> str:
+        raise BlockedError("HTTP 403")
+
+    monkeypatch.setattr(cli, "make_html_fetcher", lambda timeout: refused)
+    monkeypatch.setattr(cli, "make_browser_fetcher", lambda timeout: lambda url: ARTICLE_HTML)
+    links = tmp_path / "links.txt"
+    links.write_text("https://cf.example.com/post\n")
+    assert main(["ingest", "--links-file", str(links), "--out", str(tmp_path / "out")]) == 0
+    assert "1 ok, 0 fallback, 0 failed" in capsys.readouterr().out
 
 
 class _FakeGmail:

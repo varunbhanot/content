@@ -4,7 +4,15 @@ import httpx
 import pytest
 
 from newsletter_machine import web
-from newsletter_machine.web import MAX_BODY_BYTES, FetchError, make_html_fetcher
+from newsletter_machine.web import (
+    MAX_BODY_BYTES,
+    BlockedError,
+    FetchError,
+    guard_url,
+    header_charset,
+    make_html_fetcher,
+    with_fallback,
+)
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -149,3 +157,82 @@ def test_fetcher_enforces_total_read_deadline(monkeypatch: pytest.MonkeyPatch) -
     fetch = make_html_fetcher(5, transport=_mock(handler))
     with pytest.raises(FetchError, match="took longer"):
         fetch("https://example.com/slow")
+
+
+@pytest.mark.parametrize("status", [403, 503])
+def test_fetcher_raises_blocked_error_on_bot_protection_statuses(status: int) -> None:
+    fetch = make_html_fetcher(5, transport=_mock(_html(status=status)))
+    with pytest.raises(BlockedError, match=f"HTTP {status}"):
+        fetch("https://example.com/a")
+
+
+def test_fetcher_404_is_not_treated_as_blocked() -> None:
+    fetch = make_html_fetcher(5, transport=_mock(_html(status=404)))
+    with pytest.raises(FetchError) as info:
+        fetch("https://example.com/a")
+    assert not isinstance(info.value, BlockedError)
+
+
+def _refuse(url: str) -> str:
+    raise BlockedError("HTTP 403")
+
+
+def test_with_fallback_retries_blocked_fetch_with_fallback() -> None:
+    fetch = with_fallback(_refuse, lambda url: f"<p>{url}</p>")
+    assert fetch("https://example.com/a") == "<p>https://example.com/a</p>"
+
+
+def test_with_fallback_does_not_retry_other_errors() -> None:
+    calls: list[str] = []
+
+    def not_found(url: str) -> str:
+        raise FetchError("HTTP 404")
+
+    def fallback(url: str) -> str:
+        calls.append(url)
+        return ""
+
+    with pytest.raises(FetchError, match="HTTP 404"):
+        with_fallback(not_found, fallback)("https://example.com/a")
+    assert calls == []
+
+
+def test_with_fallback_reports_both_errors_when_fallback_fails() -> None:
+    def also_refused(url: str) -> str:
+        raise FetchError("HTTP 403")
+
+    with pytest.raises(FetchError, match="HTTP 403; browser retry failed: HTTP 403"):
+        with_fallback(_refuse, also_refused)("https://example.com/a")
+
+
+@pytest.mark.parametrize(
+    ("url", "message"),
+    [("ftp://example.com/a", "http"), ("http://10.0.0.1/", "private"), ("https:///x", "private")],
+)
+def test_guard_url_refuses_bad_targets(url: str, message: str) -> None:
+    with pytest.raises(FetchError, match=message):
+        guard_url(url)
+
+
+def test_guard_url_allows_public_https() -> None:
+    guard_url("https://example.com/a")
+
+
+@pytest.mark.parametrize(
+    ("content_type", "expected"),
+    [
+        ("text/html; charset=ISO-8859-1", "ISO-8859-1"),
+        ('text/html; charset="utf-8"', "utf-8"),
+        ("text/html", None),
+    ],
+)
+def test_header_charset(content_type: str, expected: str | None) -> None:
+    assert header_charset(content_type) == expected
+
+
+def test_rate_limit_429_is_not_treated_as_blocked() -> None:
+    """429 means 'slow down': never retried with the browser fallback."""
+    fetch = make_html_fetcher(5, transport=_mock(_html(status=429)))
+    with pytest.raises(FetchError, match="HTTP 429") as info:
+        fetch("https://example.com/a")
+    assert not isinstance(info.value, BlockedError)
