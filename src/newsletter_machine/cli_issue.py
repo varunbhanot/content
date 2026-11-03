@@ -177,8 +177,10 @@ def _prepare(args: argparse.Namespace) -> _Job:
     """Everything that can fail before a model call or a fetch (exit 2)."""
     settings = load_settings()
     configure_logging()
-    if args.sources is not None and args.since is not None:
-        raise ValueError("--since reads Gmail; it cannot be combined with --sources.")
+    if args.since is not None and (args.sources is not None or args.links_file is not None):
+        raise ValueError(
+            "--since reads Gmail; it cannot be combined with --sources or --links-file."
+        )
     paths = issue_paths(args.out)
     ingesting = args.sources is None
     _check_paths(paths, overwrite=args.overwrite, ingesting=ingesting)
@@ -194,18 +196,18 @@ class IngestRunError(Exception):
 def _gather(job: _Job, args: argparse.Namespace) -> tuple[SourceDoc, ...]:
     """Sources from ``--sources`` or freshly ingested links; () when there are no links."""
     if job.ingest is None:
-        return read_sources(args.sources)
-    links = read_links(job.ingest, job.since, args.links_file, datetime.now(UTC))
-    if not links:
-        return ()
-    try:
-        docs = ingest_to(job.ingest, links, job.paths.sources, overwrite=args.overwrite)
-    except OSError as exc:
-        raise IngestRunError(f"Could not write sources: {exc}") from exc
+        docs, where = read_sources(args.sources), args.sources
+    else:
+        links = read_links(job.ingest, job.since, args.links_file, datetime.now(UTC))
+        if not links:
+            return ()
+        try:
+            docs = ingest_to(job.ingest, links, job.paths.sources, overwrite=args.overwrite)
+        except OSError as exc:
+            raise IngestRunError(f"Could not write sources: {exc}") from exc
+        where = job.paths.sources
     if not usable_sources(docs):
-        raise IngestRunError(
-            f"No usable sources: every link failed to ingest (see {job.paths.sources})."
-        )
+        raise IngestRunError(f"No usable sources: every link failed to ingest (see {where}).")
     return docs
 
 
@@ -217,8 +219,6 @@ class _Pipeline:
 
 
 def _pipeline(job: _Job, docs: tuple[SourceDoc, ...], angle: str | None) -> _Pipeline:
-    if not usable_sources(docs):
-        raise ValueError("No usable sources: every source failed to ingest.")
     agents = job.agents
     inputs = EditorInputs(
         docs=docs,
@@ -239,10 +239,10 @@ def _pipeline(job: _Job, docs: tuple[SourceDoc, ...], angle: str | None) -> _Pip
     return _Pipeline(editor, inputs, agents.phase3.critic)
 
 
-def _progress(files: Any, version: int) -> str:
+def _progress(files: Any, version: int, final: Mapping[str, Any] | None) -> str:
     parts = []
     for v in range(1, version + 1):
-        summary = critique_summary(files, v)
+        summary = final if v == version and final else critique_summary(files, v)
         parts.append(f"v{v} ({summary['failed']} failed)" if summary else f"v{v} (not critiqued)")
     return "Editor: " + ", ".join(parts)
 
@@ -251,7 +251,6 @@ def _progress(files: Any, version: int) -> str:
 class _FinalCritique:
     markdown: str
     summary: Mapping[str, Any]
-    fresh: bool  # run by the command, not found in the editor's files
 
 
 def _final_critique(pipe: _Pipeline, run: EditorRun, draft: str, version: int) -> _FinalCritique:
@@ -259,10 +258,10 @@ def _final_critique(pipe: _Pipeline, run: EditorRun, draft: str, version: int) -
     existing = file_text(run.files, versioned(CRITIQUES_DIR, version, "md"))
     summary = critique_summary(run.files, version)
     if existing and summary:
-        return _FinalCritique(existing, summary, fresh=False)
+        return _FinalCritique(existing, summary)
     logger.info("No critique for draft v%d; running the critic once more", version)
     result = critique_version(pipe.inputs, pipe.critic, draft, version)
-    return _FinalCritique(result.markdown, result.summary, fresh=True)
+    return _FinalCritique(result.markdown, result.summary)
 
 
 def _try_critique(
@@ -276,10 +275,13 @@ def _try_critique(
         return exc
 
 
+def _final_summary(final: _FinalCritique | Exception) -> Mapping[str, Any] | None:
+    return final.summary if isinstance(final, _FinalCritique) else None
+
+
 def _notes_text(
     pipe: _Pipeline, run: EditorRun, version: int, final: _FinalCritique | Exception, name: str
 ) -> str:
-    fresh = final.summary if isinstance(final, _FinalCritique) and final.fresh else None
     summary = run.summary or (f"Editor stopped early: {run.error}" if run.error else "")
     notes = NotesInput(
         draft_name=name,
@@ -288,7 +290,7 @@ def _notes_text(
         docs=pipe.inputs.docs,
         summary=summary,
         dropped=dropped_links(run.files, version),
-        final_summary=fresh,
+        final_summary=_final_summary(final),
     )
     return render_notes(notes)
 
@@ -323,33 +325,35 @@ def _finalise(job: _Job, pipe: _Pipeline, run: EditorRun) -> int:
         errors = "; ".join(error_lines(run.files))
         print(f"Editor finished without a draft. {errors}".rstrip(), file=sys.stderr)
         return EXIT_ERROR
-    print(_progress(run.files, version))
     if not _write_draft(job, draft, version):
         return EXIT_ERROR
     final = _try_critique(pipe, run, draft, version)
+    print(_progress(run.files, version, _final_summary(final)))
+    code = _write_critique(job, final)  # before the notes: a notes failure must not lose it
     notes = _notes_text(pipe, run, version, final, job.paths.draft.name)
     if not write_reported(job.paths.notes, notes, "notes"):
         return EXIT_ERROR
     print(f"Notes -> {job.paths.notes}")
-    return _write_critique(job, final)
+    return code
 
 
 def run_issue(args: argparse.Namespace) -> int:
     try:
-        job = _prepare(args)
+        job = _prepare(args)  # settings, prompts (KeyError), paths, model packages
         docs = _gather(job, args)
-        if not docs:
-            print("No links found; nothing to draft.")
-            return 0
-        pipe = _pipeline(job, docs, args.angle)
     except (InboxError, IngestRunError) as exc:
         logger.debug("Ingest failed", exc_info=True)
         prefix = "Reading the inbox failed: " if isinstance(exc, InboxError) else ""
         print(f"{prefix}{exc}", file=sys.stderr)
         return EXIT_ERROR
     except (ConfigError, ValueError, KeyError, OSError, ImportError) as exc:
+        # usage problems only: _gather's runtime failures are IngestRunError/InboxError above
         print(f"Config error: {exc}", file=sys.stderr)
         return EXIT_CONFIG
+    if not docs:
+        print("No links found; nothing to draft.")
+        return 0
+    pipe = _pipeline(job, docs, args.angle)
     print(sources_line(docs))
     try:
         run = run_editor(pipe.editor, editor_task(docs, args.angle), seed_files(docs))

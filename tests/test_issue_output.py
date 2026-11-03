@@ -123,3 +123,23 @@ def test_keeps_the_tail_when_a_line_precedes_the_list() -> None:
     fix = normalise_sources(draft, DOCS)
     tail = "Thanks for reading.\n\n[VARUN: add story]\n"
     assert fix.draft == f"{BODY}\n\n## Sources\n\n- [A](https://e.com/a)\n\n{tail}"
+
+
+def test_links_after_the_sources_list_are_rebuilt_or_dropped_not_kept() -> None:
+    draft = (
+        f"{BODY}\n\n## Sources\n\n- [A](https://e.com/a)\n\n"
+        "Also worth reading:\n- [B](https://e.com/b)\n- [Blog](https://not.ingested/x)\n\n"
+        "*See you next week.*\n"
+    )
+    fix = normalise_sources(draft, DOCS)
+    links = "- [A](https://e.com/a)\n- [B](https://e.com/b)"
+    assert fix.draft == f"{BODY}\n\n## Sources\n\n{links}\n\n*See you next week.*\n"
+    assert fix.dropped == ("https://not.ingested/x",)
+
+
+def test_render_notes_maps_source_numbers_to_usable_sources() -> None:
+    notes = render_notes(
+        NotesInput(draft_name="x.md", final_version=0, files={}, docs=DOCS, summary="", dropped=())
+    )
+    assert "- [2] B (https://e.com/b)" in notes
+    assert "- [3] D [beta] (https://e.com/d)" in notes

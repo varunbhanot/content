@@ -194,6 +194,7 @@ def test_issue_overwrite_replaces_all_outputs(
     ("extra", "message"),
     [
         (("--sources", str(FIXTURES), "--since", "7d"), "--since"),
+        (("--links-file", str(FIXTURES / "links.txt"), "--since", "7d"), "--since"),
         (("--sources", "/no/such/dir"), "not a directory"),
         (("--since", "yesterday"), "since must look like"),
     ],
@@ -218,7 +219,7 @@ def test_issue_exits_2_without_api_key(
     assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
 
 
-def test_issue_exits_2_when_every_source_failed(
+def test_issue_exits_1_when_every_source_failed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _use_models(monkeypatch)
@@ -226,7 +227,7 @@ def test_issue_exits_2_when_every_source_failed(
     sources.mkdir()
     failed = FIXTURES / "02-failed-source.md"
     (sources / failed.name).write_text(failed.read_text())
-    assert _issue(tmp_path, "--sources", str(sources)) == 2
+    assert _issue(tmp_path, "--sources", str(sources)) == 1
     assert "No usable sources" in capsys.readouterr().err
 
 
@@ -333,6 +334,7 @@ def test_issue_names_the_notes_file_when_only_the_notes_cannot_be_written(
     err = capsys.readouterr().err
     assert "Could not write the notes: read-only disk" in err
     assert (tmp_path / "issue.md").exists()
+    assert (tmp_path / "issue.critique.md").exists()  # written before the notes
 
 
 def test_issue_notes_include_the_critique_the_command_ran_itself(

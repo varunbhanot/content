@@ -84,17 +84,19 @@ def test_editor_runs_research_draft_critique_revise_loop() -> None:
     assert "/sources/01-why-agent-demos-fail-in-production.md" in run.files
 
 
-def test_editor_cannot_write_protected_files() -> None:
+def test_editor_can_write_only_its_plan() -> None:
     write = {"file_path": "/drafts/v1.md", "content": "# Mine"}
+    stray = {"file_path": "/final.md", "content": "# Mine"}
     plan = {"file_path": "/plan.md", "content": "plan"}
     lead = fake(
         AIMessage(content="", tool_calls=[{"name": "write_file", "args": write, "id": "1"}]),
+        AIMessage(content="", tool_calls=[{"name": "write_file", "args": stray, "id": "3"}]),
         AIMessage(content="", tool_calls=[{"name": "write_file", "args": plan, "id": "2"}]),
         "done",
     )
     editor = build_editor(lead, _subagents((), ()), editor_system_prompt(1))
     run = run_editor(editor, "task", {})
-    assert "/drafts/v1.md" not in run.files
+    assert "/drafts/v1.md" not in run.files and "/final.md" not in run.files
     assert file_text(run.files, "/plan.md") == "plan"
 
 

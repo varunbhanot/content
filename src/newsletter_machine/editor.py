@@ -15,7 +15,7 @@ from langgraph.graph.state import CompiledStateGraph
 from newsletter_machine.agent import extract_text
 from newsletter_machine.prompts import Prompt, load_prompt, render
 from newsletter_machine.sources import SourceDoc
-from newsletter_machine.workspace import DRAFTS_DIR, PROTECTED_DIRS, latest_version
+from newsletter_machine.workspace import DRAFTS_DIR, PLAN_FILE, latest_version
 from newsletter_machine.writer import angle_line, neutralise_tags, usable_sources
 
 logger = logging.getLogger(__name__)
@@ -23,10 +23,9 @@ logger = logging.getLogger(__name__)
 EDITOR_NAME = "editor"
 EDITOR_RECURSION_LIMIT = 120  # ~55 model turns: room for 3 revisions plus reads and todos
 EDITOR_THREAD = "issue"  # one in-memory thread per editor; lets a failed run be salvaged
-EDITOR_PERMISSIONS = [
-    FilesystemPermission(
-        operations=["write"], paths=[f"{d}/**" for d in PROTECTED_DIRS], mode="deny"
-    )
+EDITOR_PERMISSIONS = [  # first match wins: the lead may write its plan and nothing else
+    FilesystemPermission(operations=["write"], paths=[PLAN_FILE], mode="allow"),
+    FilesystemPermission(operations=["write"], paths=["/**"], mode="deny"),
 ]
 
 

@@ -21,7 +21,6 @@ DRAFTS_DIR = "/drafts"
 BRIEFS_DIR = "/briefs"
 CRITIQUES_DIR = "/critiques"
 ERRORS_DIR = "/errors"
-PROTECTED_DIRS = (SOURCES_DIR, "/research", DRAFTS_DIR, BRIEFS_DIR, CRITIQUES_DIR, ERRORS_DIR)
 
 Files = Mapping[str, Any]
 

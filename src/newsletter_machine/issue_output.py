@@ -66,18 +66,28 @@ def _split_section(section: str) -> tuple[str, str]:
     return "\n".join(lines[:end]), "\n".join(lines[end:]).strip()
 
 
+def _split_tail(tail: str) -> tuple[str, str]:
+    """``(linked, kept)``: tail paragraphs holding a URL join the Sources list; the rest stay."""
+    blocks = [block for block in re.split(r"\n\s*\n", tail) if block.strip()]
+    linked = [block for block in blocks if extract_urls(html.unescape(block))]
+    kept = [block for block in blocks if block not in linked]
+    return "\n\n".join(linked), "\n\n".join(kept)
+
+
 def normalise_sources(draft: str, docs: Iterable[SourceDoc]) -> SourcesFix:
     """Rebuild ``## Sources`` from ingested sources only, titled as ingested.
 
     Keeps the writer's order; drops links that are not usable sources; lists every usable
     source when the writer cited none (or wrote no Sources section). Text after the list
-    (a sign-off, a ``[VARUN: ...]`` marker) stays after it.
+    (a sign-off, a ``[VARUN: ...]`` marker) stays after it, unless a paragraph holds links:
+    those are Sources too, so they are rebuilt or dropped like the list.
     """
     usable = usable_sources(docs)
     match = SOURCES_HEADING.search(draft)
     body = (draft[: match.start()] if match else draft).rstrip()
     listed, tail = _split_section(draft[match.start() :]) if match else ("", "")
-    cited, dropped = _cited(listed, usable)
+    linked, tail = _split_tail(tail)
+    cited, dropped = _cited(f"{listed}\n{linked}", usable)
     links = "\n".join(_link(doc) for doc in (cited or usable))
     after = f"\n{tail}\n" if tail else ""
     return SourcesFix(f"{body}\n\n{SOURCES_TITLE}\n\n{links}\n{after}", tuple(dropped))
@@ -91,7 +101,7 @@ class NotesInput:
     docs: tuple[SourceDoc, ...]
     summary: str
     dropped: tuple[str, ...]
-    final_summary: Mapping[str, Any] | None = None  # a critique the command ran itself
+    final_summary: Mapping[str, Any] | None = None  # the final version's critique counts
 
 
 def critique_summary(files: Files, version: int) -> dict[str, Any] | None:
@@ -134,6 +144,12 @@ def _source_lines(docs: tuple[SourceDoc, ...], dropped: tuple[str, ...]) -> list
     return lines or ["- Every source ingested and every cited link matched."]
 
 
+def _numbers(docs: tuple[SourceDoc, ...]) -> str:
+    """``[n]`` as the agents use it (usable sources only), so a claim traces to its source."""
+    lines = [f"- [{i}] {d.title} ({d.url})" for i, d in enumerate(usable_sources(docs), start=1)]
+    return "\n".join(lines) or "(no usable sources)"
+
+
 def _research(files: Files) -> str:
     notes = file_text(files, RESEARCH_NOTES)
     if not notes:
@@ -158,6 +174,7 @@ def render_notes(notes: NotesInput) -> str:
         _section("Editor's summary", notes.summary or "(no summary)"),
         _section("Run log", "\n".join(run_log)),
         _section("Sources", "\n".join(_source_lines(notes.docs, notes.dropped))),
+        _section("Source numbers ([n] in the plan, briefs and notes)", _numbers(notes.docs)),
         _section("Plan", file_text(files, PLAN_FILE) or "(no plan written)"),
         _section("Final brief", brief or "(no brief)"),
         _section("Research notes", _research(files)),
