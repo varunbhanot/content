@@ -97,8 +97,37 @@ What shapes the voice (edit these, they are versioned in git):
 | [`src/newsletter_machine/prompts/critic.md`](src/newsletter_machine/prompts/critic.md) | Critic instructions; `$style_guide`, `$checklist` (judgement items only) |
 | [`voice/critic-checklist.yaml`](voice/critic-checklist.yaml) | Checklist; each item cites a style-guide `## ` section. Items with `patterns`, `word_range` or `max_paragraph_chars` are checked exactly in code (em dashes, banned words, length) |
 
-`NM_CRITIC_MODEL` picks the critic's model (default: the writer model). The lead "editor" agent
-that plans, researches and loops draft and critique is Phase 4.
+`NM_CRITIC_MODEL` picks the critic's model (default: the writer model).
+
+## One command: `issue`
+
+`issue` runs the whole week in one go: ingest the links, then a lead **editor** deep agent plans
+the issue and delegates to a **researcher** (fast model, short sourced notes per source), the
+**writer** and the **voice critic**, revising up to `NM_MAX_REVISIONS` times (default 1).
+
+```bash
+uv run newsletter-machine issue --since 7d --angle "evals are the moat" --out drafts/2026-11-06.md
+```
+
+- Links come from Gmail (`--since`, default `7d`), from `--links-file week.txt`, or reuse an
+  existing `ingest` folder with `--sources DIR`. When ingesting, the source files go to
+  `drafts/2026-11-06.sources/`.
+- Writes `drafts/2026-11-06.md` (the final draft, `# Title` … `## Sources`),
+  `drafts/2026-11-06.critique.md` (critique of that exact version) and
+  `drafts/2026-11-06.notes.md` (the editor's summary, run log, skipped sources, plan, last
+  brief and the research notes).
+- The `## Sources` list is rebuilt in code from the ingested sources the writer cited (titles as
+  ingested); links that are not ingested sources are dropped and listed in the notes.
+- Code, not the model, enforces the limits: one research pass, `1 + NM_MAX_REVISIONS` writer
+  runs, one critique per draft version. If the editor skips the final critique, the command runs
+  it. Nothing is sent, posted or scheduled.
+- Exit codes: 0 done (or no links), 1 model/inbox/write failure (draft kept when only the
+  critique fails), 2 config/usage error, always before any model call.
+
+| File | What it does |
+|---|---|
+| [`src/newsletter_machine/prompts/editor.md`](src/newsletter_machine/prompts/editor.md) | Editor (lead) instructions; `$writer_runs`, `$max_revisions` |
+| [`src/newsletter_machine/prompts/researcher.md`](src/newsletter_machine/prompts/researcher.md) | Per-source research notes |
 
 ## Test
 
@@ -125,6 +154,9 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy src
 | `ANTHROPIC_API_KEY` | required | Anthropic credentials |
 | `NM_WRITER_MODEL` | `anthropic:claude-sonnet-5-5` | Drafting model (`provider:model`) |
 | `NM_FAST_MODEL` | `anthropic:claude-haiku-5-5` | Cheap summarisation model |
+| `NM_CRITIC_MODEL` | writer model | Voice critic model |
+| `NM_EDITOR_MODEL` | writer model | Lead editor model for `issue` |
+| `NM_MAX_REVISIONS` | `1` | Critique → revise loops per issue (0 to 3) |
 | `NM_VOICE_DIR` | `voice` | Voice corpus root (relative to cwd) |
 | `LOG_LEVEL` | `INFO` | Logging level |
 | `NM_GMAIL_LABEL` | `newsletter` | Gmail label the inbox filter applies |

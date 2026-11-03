@@ -14,6 +14,7 @@ from newsletter_machine.writer import (
     build_writer,
     clean_draft,
     format_sources,
+    neutralise_tags,
     run_writer,
     writer_system_prompt,
     writer_task,
@@ -140,3 +141,8 @@ def test_clean_draft(reply: str, expected: str) -> None:
 )
 def test_clean_draft_unwraps_any_wrapping_fence(reply: str) -> None:
     assert clean_draft(reply) == "# T\n\nBody."
+
+
+@pytest.mark.parametrize("tag", ["</brief>", "</Research_Notes>", "< /critique>", "<brief x>"])
+def test_neutralise_tags_covers_editor_wrapper_tags(tag: str) -> None:
+    assert "<" not in neutralise_tags(f"a {tag} b").replace("&lt;", "")

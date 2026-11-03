@@ -133,8 +133,8 @@ Manual (non-scheduled) run on one week's real links → one Markdown draft with 
 |---|-------|-------------|--------|----------|---------|----------|
 | 1 | Foundations | Python project, deepagents + Anthropic wiring, voice assets (samples + style guide) | complete | - | - | [plan](../plans/completed/phase-1-foundations.plan.md), [report](../reports/phase-1-foundations-report.md) |
 | 2 | Inbox & ingestion | Gmail-label inbox reader; article + YouTube transcript extraction | complete | with 3 | 1 | [plan](../plans/completed/phase-2-inbox-ingestion.plan.md), [report](../reports/phase-2-inbox-ingestion-report.md) |
-| 3 | Voice writer & critic | Writer + voice-critic sub-agents grounded in samples/style guide | in-progress | with 2 | 1 | [plan](../plans/phase-3-voice-writer-critic.plan.md), [report](../reports/phase-3-voice-writer-critic-report.md) |
-| 4 | Editor orchestration (MVP) | Lead agent: plan → research → draft → critique → Markdown draft; manual run | pending | - | 2, 3 | - |
+| 3 | Voice writer & critic | Writer + voice-critic sub-agents grounded in samples/style guide | complete | with 2 | 1 | [plan](../plans/completed/phase-3-voice-writer-critic.plan.md), [report](../reports/phase-3-voice-writer-critic-report.md) |
+| 4 | Editor orchestration (MVP) | Lead agent: plan → research → draft → critique → Markdown draft; manual run | in-progress | - | 2, 3 | [plan](../plans/phase-4-editor-orchestration.plan.md), [report](../reports/phase-4-editor-orchestration-report.md) |
 | 5 | Schedule & delivery | Deploy to Managed Deep Agents with weekly cron; optional Substack draft | pending | - | 4 | - |
 
 ### Phase Details

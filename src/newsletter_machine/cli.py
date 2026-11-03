@@ -1,18 +1,28 @@
-"""Command-line entry point: ``newsletter-machine hello``, ``ingest`` and ``draft``."""
+"""Command-line entry point: ``newsletter-machine hello``, ``ingest``, ``draft``, ``issue``."""
 
 import argparse
 import logging
-import os
 import sys
-from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from newsletter_machine.agent import build_hello_agent, extract_text, make_chat_model
-from newsletter_machine.browser_fetch import make_browser_fetcher
 from newsletter_machine.checklist import Checklist
 from newsletter_machine.checks import prose_words
+from newsletter_machine.cli_common import (
+    DEFAULT_SINCE,
+    EXIT_CONFIG,
+    EXIT_ERROR,
+    InboxError,
+    configure_logging,
+    ingest_to,
+    print_critique_line,
+    read_links,
+    sources_line,
+    write_reported,
+)
+from newsletter_machine.cli_issue import add_issue_parser, run_issue
 from newsletter_machine.config import (
     ConfigError,
     IngestSettings,
@@ -29,13 +39,10 @@ from newsletter_machine.drafting import (
     output_paths,
     write_atomic,
 )
-from newsletter_machine.gmail import build_gmail_client, read_inbox_links
 from newsletter_machine.grounding import load_grounding
-from newsletter_machine.ingest import check_out_dir, ingest_links, read_sources, write_sources
-from newsletter_machine.sources import InboxLink, SourceDoc, parse_since, read_links_file
-from newsletter_machine.web import make_html_fetcher, with_fallback
-from newsletter_machine.writer import run_writer, usable_sources, writer_task
-from newsletter_machine.youtube import make_transcript_fetcher
+from newsletter_machine.ingest import check_out_dir, read_sources
+from newsletter_machine.sources import InboxLink, SourceDoc, parse_since
+from newsletter_machine.writer import run_writer, writer_task
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +50,6 @@ DEFAULT_QUESTION = (
     "List the hand-written posts, read two of them, and name three concrete traits of "
     "Varun's voice with a short quote for each."
 )
-DEFAULT_LOG_LEVEL = "INFO"
-DEFAULT_SINCE = "7d"
-EXIT_ERROR = 1
-EXIT_CONFIG = 2
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -70,16 +73,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--out", required=True, type=Path, help="Draft file (.md); critique beside it"
     )
     draft.add_argument("--overwrite", action="store_true", help="Replace existing draft/critique")
+    add_issue_parser(sub)
     return parser
-
-
-def _configure_logging() -> None:
-    """Configure logging after .env is loaded; fall back to INFO on an unknown LOG_LEVEL."""
-    requested = os.environ.get("LOG_LEVEL", DEFAULT_LOG_LEVEL).upper()
-    level = requested if requested in logging.getLevelNamesMapping() else DEFAULT_LOG_LEVEL
-    logging.basicConfig(level=level)
-    if level != requested:
-        logger.warning("Unknown LOG_LEVEL %r, using %s", requested, DEFAULT_LOG_LEVEL)
 
 
 def _run_hello(question: str) -> int:
@@ -88,7 +83,7 @@ def _run_hello(question: str) -> int:
     except ConfigError as exc:
         print(f"Config error: {exc}", file=sys.stderr)
         return EXIT_CONFIG
-    _configure_logging()
+    configure_logging()
     try:
         agent = build_hello_agent(settings)
         result = agent.invoke({"messages": [{"role": "user", "content": question}]})
@@ -100,55 +95,20 @@ def _run_hello(question: str) -> int:
     return 0
 
 
-class _InboxError(Exception):
-    """Reading Gmail failed for a runtime (not configuration) reason."""
-
-
-def _gmail_links(settings: IngestSettings, since: datetime) -> tuple[InboxLink, ...]:
-    client = build_gmail_client(settings)
-    links = read_inbox_links(
-        client, settings.gmail_label, since, senders=settings.gmail_allowed_senders
-    )
-    senders = ", ".join(settings.gmail_allowed_senders)
-    print(
-        f"Found {len(links)} links in label {settings.gmail_label!r} "
-        f"from {senders} since {since:%Y-%m-%d}"
-    )
-    return links
-
-
 def _collect_links(args: argparse.Namespace) -> tuple[IngestSettings, tuple[InboxLink, ...]]:
     """Validate inputs (exit 2 on failure), then read links from the file or Gmail (exit 1)."""
     now = datetime.now(UTC)
     settings = load_ingest_settings()
-    _configure_logging()
+    configure_logging()
     since = parse_since(args.since, now)
     check_out_dir(args.out, overwrite=args.overwrite)
-    if args.links_file is not None:
-        return settings, read_links_file(args.links_file, now)
-    try:
-        return settings, _gmail_links(settings, since)
-    except ConfigError:
-        raise
-    except Exception as exc:  # Gmail API / auth / network failures surface as many types
-        raise _InboxError(str(exc)) from exc
-
-
-def _print_summary(docs: tuple[SourceDoc, ...], paths: tuple[Path, ...], out: Path) -> None:
-    for doc, path in zip(docs, paths, strict=True):
-        suffix = f"  ({doc.detail})" if doc.detail else ""
-        print(f"  {doc.status:<8} {path.name}{suffix}")
-    counts = Counter(doc.status for doc in docs)
-    print(
-        f"Wrote {len(paths)} files to {out} "
-        f"({counts['ok']} ok, {counts['fallback']} fallback, {counts['failed']} failed)"
-    )
+    return settings, read_links(settings, since, args.links_file, now)
 
 
 def _run_ingest(args: argparse.Namespace) -> int:
     try:
         settings, links = _collect_links(args)
-    except _InboxError as exc:
+    except InboxError as exc:
         logger.debug("Reading the inbox failed", exc_info=True)
         print(f"Reading the inbox failed: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -158,22 +118,11 @@ def _run_ingest(args: argparse.Namespace) -> int:
     if not links:
         print("No links found; nothing to ingest.")
         return 0
-    docs = ingest_links(
-        links,
-        fetch_html=with_fallback(
-            make_html_fetcher(settings.fetch_timeout),
-            make_browser_fetcher(settings.fetch_timeout),
-        ),
-        fetch_transcript=make_transcript_fetcher(
-            settings.transcript_languages, timeout=settings.fetch_timeout
-        ),
-    )
     try:
-        paths = write_sources(docs, args.out, overwrite=args.overwrite)
+        ingest_to(settings, links, args.out, overwrite=args.overwrite)
     except OSError as exc:
         print(f"Could not write sources: {exc}", file=sys.stderr)
         return EXIT_ERROR
-    _print_summary(docs, paths, args.out)
     return 0
 
 
@@ -189,7 +138,7 @@ class _DraftJob:
 def _prepare_draft(args: argparse.Namespace) -> _DraftJob:
     """Everything that can fail before a model call (exit 2): settings, sources, voice, out."""
     settings = load_settings()
-    _configure_logging()
+    configure_logging()
     paths = output_paths(args.out)
     check_outputs(paths, overwrite=args.overwrite)
     docs = read_sources(args.sources)
@@ -234,24 +183,16 @@ def _critique_draft(job: _DraftJob, draft: str, words: int) -> int:
         logger.debug("Critic run failed", exc_info=True)
         print(f"Critic failed: {exc} (draft kept at {job.paths.draft})", file=sys.stderr)
         return EXIT_ERROR
-    try:
-        write_atomic(job.paths.critique, render_critique(critique, _report_meta(job, words)))
-    except OSError as exc:
-        print(f"Could not write the critique: {exc}", file=sys.stderr)
+    markdown = render_critique(critique, _report_meta(job, words))
+    if not write_reported(job.paths.critique, markdown, "critique"):
         return EXIT_ERROR
-    print(
-        f"Critique: {critique.passed} passed, {critique.failed} failed, "
-        f"{critique.not_checked} not checked -> {job.paths.critique}"
-    )
+    counts = {
+        "passed": critique.passed,
+        "failed": critique.failed,
+        "not_checked": critique.not_checked,
+    }
+    print_critique_line(counts, job.paths.critique)
     return 0
-
-
-def _sources_line(docs: tuple[SourceDoc, ...]) -> str:
-    usable = len(usable_sources(docs))
-    skipped = len(docs) - usable
-    plural = "source" if skipped == 1 else "sources"
-    suffix = f" ({skipped} failed {plural} skipped)" if skipped else ""
-    return f"Using {usable} of {len(docs)} sources{suffix}"
 
 
 def _run_draft(args: argparse.Namespace) -> int:
@@ -261,7 +202,7 @@ def _run_draft(args: argparse.Namespace) -> int:
         # settings, sources, voice files, prompts, --out, model provider package missing
         print(f"Config error: {exc}", file=sys.stderr)
         return EXIT_CONFIG
-    print(_sources_line(job.docs))
+    print(sources_line(job.docs))
     try:
         draft = run_writer(job.agents.writer, job.task)
     except Exception as exc:  # network/API failures surface as many types
@@ -278,4 +219,6 @@ def main(argv: list[str] | None = None) -> int:
         return _run_ingest(args)
     if args.command == "draft":
         return _run_draft(args)
+    if args.command == "issue":
+        return run_issue(args)
     return _run_hello(args.question)
