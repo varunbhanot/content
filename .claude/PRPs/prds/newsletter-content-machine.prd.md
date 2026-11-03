@@ -47,9 +47,9 @@ We'll know we're right when he ships 4 consecutive weekly issues produced with t
 - [x] ~~What does a typical issue look like?~~ Resolved: single-topic practical essays on agentic AI in production, ~550–1,400 words by hand (~1,100–1,800 AI-assisted). Corpus in `voice/` (see `voice/README.md`).
 - [x] ~~Baseline subscriber count and growth target~~ Resolved: 272 on 2026-11-02; target 1,000 (see Success Metrics).
 - [x] ~~Do distribution helpers need to be in v1?~~ Resolved: no. v1 sets the content-only baseline; Substack Notes / LinkedIn becomes a separate add-on PRD aimed at the 1,000 goal.
-- [ ] Does Managed Deep Agents scheduling (cron) work on the free Developer tier, or need Plus? Product is in beta (docs conflict: public vs. private/US-only).
-- [ ] Will YouTube transcript fetching work from LangSmith cloud IPs, or is a fallback needed?
-- [ ] Confirm inbox choice (see Decisions Log) works on Varun's phone share-sheet flow.
+- [x] ~~Does Managed Deep Agents scheduling (cron) work on the free Developer tier, or need Plus?~~ Resolved (2026-11-03): pricing lists cron and Managed Deep Agents under Plus ($39/seat/month), over budget. Owner runs locally instead (see Decisions Log); deploy files stay in the repo.
+- [x] ~~Will YouTube transcript fetching work from LangSmith cloud IPs?~~ Closed as not applicable (2026-11-03): ingestion runs on the owner's laptop. Reopen if hosting moves to the cloud.
+- [ ] Confirm inbox choice (see Decisions Log) works on Varun's phone share-sheet flow. Still open: needs a real phone test.
 
 ---
 
@@ -198,4 +198,4 @@ Sources: docs.langchain.com/oss/python/deepagents; docs.langchain.com/langsmith/
 ---
 
 *Generated: 2026-11-02*
-*Status: DRAFT - needs validation*
+*Status: BUILT - all 5 phases merged (2026-11-03); validation pending (first live runs, ≤30 min edit on 2 consecutive issues, cost check). Close once those pass.*
