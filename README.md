@@ -139,8 +139,17 @@ uv run newsletter-machine issue --since 7d --angle "evals are the moat" --out dr
 - Code, not the model, enforces the limits: one research pass, `1 + NM_MAX_REVISIONS` writer
   runs, one critique per draft version. If the editor skips the final critique, the command runs
   it. Nothing is sent, posted or scheduled.
+- Then an **illustrator** reads the final draft and decides which visuals, if any, earn their
+  place (up to `NM_MAX_VISUALS`, default 3): diagrams as SVG or Mermaid, charts as SVG (every
+  number must appear in the sources), and photo-style images as a ready-to-paste prompt for an
+  image tool. It animates (SVG SMIL) only when the point is motion or order. Code sanitises
+  every SVG (no scripts, handlers or external links), names files `visual-N`, writes them to
+  `drafts/2026-11-06.images/` and inserts each one after the paragraph it belongs to. The notes
+  get a **Visuals** section: why each was chosen, why it is or is not animated, what was dropped.
+  Substack shows SVG animation as a still, so export a GIF if the motion matters. Skip it with
+  `--no-visuals`; if it fails, the draft is kept without visuals.
 - Exit codes: 0 done (or no links), 1 model/inbox/write failure (draft kept when only the
-  critique fails), 2 config/usage error, always before any model call.
+  critique or the illustrator fails), 2 config/usage error, always before any model call.
 
 | File | What it does |
 |---|---|
@@ -313,6 +322,8 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy src
 | `NM_CRITIC_MODEL` | writer model | Voice critic model |
 | `NM_EDITOR_MODEL` | writer model | Lead editor model for `issue` |
 | `NM_MAX_REVISIONS` | `1` | Critique → revise loops per issue (0 to 3) |
+| `NM_ILLUSTRATOR_MODEL` | writer model | Illustrator model for `issue` (draws the SVG) |
+| `NM_MAX_VISUALS` | `3` | Most visuals per issue (0 to 5; 0 turns the illustrator off) |
 | `NM_VOICE_DIR` | `voice` | Voice corpus root (relative to cwd) |
 | `LOG_LEVEL` | `INFO` | Logging level |
 | `NM_GMAIL_LABEL` | `newsletter` | Gmail label the inbox filter applies |

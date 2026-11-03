@@ -226,3 +226,32 @@ def test_issue_only_settings_do_not_break_other_commands(
     settings = load_settings(bad)  # hello and draft never read them
     with pytest.raises(ConfigError, match="NM_EDITOR_MODEL"):
         load_editor_settings(settings, bad)
+
+
+def test_visual_settings_default_to_three_and_the_writer_model(
+    make_voice_dir: Callable[..., Path],
+) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    env = {**env, "NM_WRITER_MODEL": "anthropic:w"}
+    editor = load_editor_settings(load_settings(env), env)
+    assert editor.max_visuals == 3
+    assert editor.illustrator_model == "anthropic:w"
+
+
+@pytest.mark.parametrize(("value", "expected"), [("0", 0), (" 5 ", 5), ("", 3)])
+def test_max_visuals_accepts_zero_to_five(
+    make_voice_dir: Callable[..., Path], value: str, expected: int
+) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    env = {**env, "NM_MAX_VISUALS": value, "NM_ILLUSTRATOR_MODEL": "anthropic:i"}
+    editor = load_editor_settings(load_settings(env), env)
+    assert editor.max_visuals == expected
+    assert editor.illustrator_model == "anthropic:i"
+
+
+@pytest.mark.parametrize("value", ["6", "-1", "x"])
+def test_max_visuals_rejects_out_of_range(make_voice_dir: Callable[..., Path], value: str) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    env = {**env, "NM_MAX_VISUALS": value}
+    with pytest.raises(ConfigError, match="NM_MAX_VISUALS"):
+        load_editor_settings(load_settings(env), env)

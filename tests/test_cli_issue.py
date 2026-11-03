@@ -5,7 +5,16 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
-from fakes import DRAFT, FIXTURES, VOICE, FakeModel, critic_reply, fake, task_call
+from fakes import (
+    DRAFT,
+    FIXTURES,
+    VOICE,
+    FakeModel,
+    critic_reply,
+    fake,
+    illustrator_reply,
+    task_call,
+)
 from newsletter_machine import cli_common, cli_issue, config
 from newsletter_machine.cli import main
 from newsletter_machine.ingest import read_sources
@@ -28,6 +37,7 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("writer", "critic", "editor", "fast"):
         monkeypatch.setenv(f"NM_{name.upper()}_MODEL", f"fake:{name}")
     monkeypatch.setenv("NM_MAX_REVISIONS", "1")
+    monkeypatch.setenv("NM_ILLUSTRATOR_MODEL", "fake:illustrator")
 
 
 def _use_models(
@@ -37,6 +47,7 @@ def _use_models(
     writer: Sequence[Any] = (DRAFT_WITH_FAKE_LINK,),
     critic: Sequence[Any] = (),
     fast: Sequence[Any] = ("- the 31% number",),
+    illustrator: Sequence[Any] = (),
 ) -> dict[str, str]:
     critic = critic or (critic_reply(),)
     replies = {
@@ -44,6 +55,7 @@ def _use_models(
         "fake:writer": writer,
         "fake:critic": critic,
         "fake:fast": fast,
+        "fake:illustrator": illustrator or (illustrator_reply(),),
     }
     seen: dict[str, str] = {}
 
@@ -81,7 +93,7 @@ def test_issue_from_sources_writes_draft_critique_and_notes(
     assert "Editor: v1 (" in out
     assert "issue.md" in out and "final draft v1" in out
     assert "Critique:" in out and "issue.critique.md" in out and "issue.notes.md" in out
-    assert seen == {f"fake:{n}": "k" for n in ("editor", "writer", "critic", "fast")}
+    assert seen == {f"fake:{n}": "k" for n in ("editor", "writer", "critic", "fast", "illustrator")}
     assert not (tmp_path / "issue.sources").exists()
 
 
@@ -108,7 +120,7 @@ def test_issue_with_no_links_exits_0_without_model_calls(
     assert _issue(tmp_path, "--links-file", str(links)) == 0
     assert "nothing to draft" in capsys.readouterr().out
     assert not (tmp_path / "issue.md").exists()
-    assert set(seen) <= {f"fake:{n}" for n in ("editor", "writer", "critic", "fast")}
+    assert set(seen) <= {f"fake:{n}" for n in ("editor", "writer", "critic", "fast", "illustrator")}
 
 
 def test_issue_gmail_failure_exits_1(
@@ -396,3 +408,90 @@ def test_issue_rerun_hints_at_reusing_the_ingested_sources(
     assert _issue(tmp_path, "--links-file", str(tmp_path / "links.txt")) == 2
     err = capsys.readouterr().err
     assert f"--sources {folder}" in err and "--overwrite" in err and "--out directory" not in err
+
+
+SVG = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4"/></svg>'
+VISUAL = {
+    "purpose": "Shows the gap.",
+    "anchor": "Production did not.",
+    "kind": "diagram",
+    "format": "svg",
+    "animated": False,
+    "animation_reason": "Static structure.",
+    "alt": "Demo box and production box.",
+    "caption": "The gap is the point.",
+    "code": SVG,
+}
+
+
+def test_issue_places_visuals_and_writes_images(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _use_models(monkeypatch, illustrator=(illustrator_reply(VISUAL),))
+    assert _from_fixtures(tmp_path) == 0
+    draft = (tmp_path / "issue.md").read_text()
+    image = "![Demo box and production box.](issue.images/visual-1.svg)"
+    assert f"Production did not.\n\n{image}" in draft
+    assert draft.rstrip().endswith(f"({CITED})")
+    assert (tmp_path / "issue.images" / "visual-1.svg").read_text().startswith("<svg")
+    notes = (tmp_path / "issue.notes.md").read_text()
+    assert "## Visuals" in notes and "visual-1" in notes
+    assert "Visuals: 1 placed" in capsys.readouterr().out
+
+
+def test_issue_no_visuals_skips_the_illustrator(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _use_models(monkeypatch, illustrator=(illustrator_reply(VISUAL),))
+    assert _from_fixtures(tmp_path, "--no-visuals") == 0
+    assert "![" not in (tmp_path / "issue.md").read_text()
+    assert not (tmp_path / "issue.images").exists()
+    assert "turned off" in (tmp_path / "issue.notes.md").read_text()
+
+
+def test_issue_illustrator_failure_keeps_the_draft(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _use_models(monkeypatch, illustrator=(AIMessage(content="no structure"),))
+    monkeypatch.setattr(
+        cli_issue, "illustrate", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    assert _from_fixtures(tmp_path) == 0
+    assert (tmp_path / "issue.md").read_text().startswith("# Evals are the moat")
+    assert "Illustrator failed: boom" in capsys.readouterr().err
+    assert "Illustrator failed: boom" in (tmp_path / "issue.notes.md").read_text()
+
+
+def test_issue_refuses_existing_images_without_overwrite(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _use_models(monkeypatch)
+    (tmp_path / "issue.images").mkdir()
+    (tmp_path / "issue.images" / "visual-1.svg").write_text("old")
+    assert _from_fixtures(tmp_path) == 2
+
+
+def test_issue_overwrite_clears_old_visuals_even_when_illustrator_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _use_models(monkeypatch)
+    old = tmp_path / "issue.images" / "visual-9.svg"
+    old.parent.mkdir()
+    old.write_text("old")
+    monkeypatch.setattr(
+        cli_issue, "illustrate", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    assert _from_fixtures(tmp_path, "--overwrite") == 0
+    assert not old.exists()
+
+
+def test_issue_word_count_ignores_visuals(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _use_models(monkeypatch)
+    assert _from_fixtures(tmp_path) == 0
+    plain = capsys.readouterr().out
+    _use_models(monkeypatch, illustrator=(illustrator_reply(VISUAL),))
+    assert _from_fixtures(tmp_path, "--overwrite") == 0
+    words = [line for line in plain.splitlines() if line.startswith("Wrote ") and "words" in line]
+    assert words[0].split("(")[1] in capsys.readouterr().out

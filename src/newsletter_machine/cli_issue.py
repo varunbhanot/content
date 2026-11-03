@@ -6,6 +6,7 @@ Exit codes as elsewhere: 0 done (or nothing to draft), 1 runtime/model/write fai
 
 import argparse
 import logging
+import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -62,6 +63,14 @@ from newsletter_machine.editor_subagents import (
     dropped_links,
 )
 from newsletter_machine.grounding import load_grounding
+from newsletter_machine.illustrator import (
+    Illustration,
+    build_illustrator,
+    illustrate,
+    illustrator_system_prompt,
+    render_visual_notes,
+    write_visuals,
+)
 from newsletter_machine.ingest import check_out_dir, read_sources
 from newsletter_machine.issue_output import (
     NotesInput,
@@ -85,6 +94,9 @@ logger = logging.getLogger(__name__)
 
 NOTES_SUFFIX = ".notes.md"
 SOURCES_SUFFIX = ".sources"
+IMAGES_SUFFIX = ".images"
+OWN_VISUAL = re.compile(r"visual-\d+\.(?:svg|mmd)")  # only files the illustrator names
+VISUALS_OFF = "- Visuals turned off (--no-visuals or NM_MAX_VISUALS=0)."
 
 
 def add_issue_parser(sub: Any) -> None:
@@ -98,6 +110,9 @@ def add_issue_parser(sub: Any) -> None:
     inputs.add_argument("--links-file", type=Path, help="Read 'URL [note]' lines, not Gmail")
     issue.add_argument("--since", help=f"Gmail window: 7d, 24h, 2w or YYYY-MM-DD ({DEFAULT_SINCE})")
     issue.add_argument("--overwrite", action="store_true", help="Replace earlier outputs")
+    issue.add_argument(
+        "--no-visuals", action="store_true", help="Skip the illustrator (no diagrams or images)"
+    )
 
 
 @dataclass(frozen=True)
@@ -106,6 +121,7 @@ class IssuePaths:
     critique: Path
     notes: Path
     sources: Path  # where ingest writes this week's source files
+    images: Path  # the illustrator's SVG/Mermaid files, linked from the draft
 
 
 def issue_paths(out: Path) -> IssuePaths:
@@ -116,12 +132,21 @@ def issue_paths(out: Path) -> IssuePaths:
         critique=base.critique,
         notes=out.with_name(f"{out.stem}{NOTES_SUFFIX}"),
         sources=out.with_name(f"{out.stem}{SOURCES_SUFFIX}"),
+        images=out.with_name(f"{out.stem}{IMAGES_SUFFIX}"),
     )
+
+
+def _check_images(images: Path, *, overwrite: bool) -> None:
+    if images.exists() and not images.is_dir():
+        raise NotADirectoryError(f"{images} exists and is not a directory.")
+    if images.is_dir() and any(images.iterdir()) and not overwrite:
+        raise FileExistsError(f"{images} holds visuals from an earlier run; pass --overwrite.")
 
 
 def _check_paths(paths: IssuePaths, *, overwrite: bool, ingesting: bool) -> None:
     check_outputs(OutputPaths(paths.draft, paths.critique), overwrite=overwrite)
     check_target(paths.notes, overwrite=overwrite)
+    _check_images(paths.images, overwrite=overwrite)
     if not ingesting:
         return
     try:
@@ -143,6 +168,8 @@ class _Agents:
     editor_prompt: str
     checklist: Checklist
     max_revisions: int
+    illustrator: CompiledSubAgent | None  # None when visuals are off
+    max_visuals: int
 
 
 @dataclass(frozen=True)
@@ -153,7 +180,7 @@ class _Job:
     since: datetime
 
 
-def _build_agents(settings: Settings) -> _Agents:
+def _build_agents(settings: Settings, *, visuals: bool = True) -> _Agents:
     editor = load_editor_settings(settings)
     grounding = load_grounding(settings.voice_dir)
     key = settings.anthropic_api_key
@@ -163,6 +190,12 @@ def _build_agents(settings: Settings) -> _Agents:
         make_chat_model(settings.critic_model, key),
     )
     fast = make_chat_model(settings.fast_model, key)
+    illustrator = None
+    if visuals and editor.max_visuals:
+        illustrator = build_illustrator(
+            make_chat_model(editor.illustrator_model, key),
+            illustrator_system_prompt(editor.max_visuals),
+        )
     return _Agents(
         phase3=phase3,
         researcher=build_researcher(fast, researcher_system_prompt()),
@@ -170,6 +203,8 @@ def _build_agents(settings: Settings) -> _Agents:
         editor_prompt=editor_system_prompt(editor.max_revisions),
         checklist=grounding.checklist,
         max_revisions=editor.max_revisions,
+        illustrator=illustrator,
+        max_visuals=editor.max_visuals,
     )
 
 
@@ -186,7 +221,8 @@ def _prepare(args: argparse.Namespace) -> _Job:
     _check_paths(paths, overwrite=args.overwrite, ingesting=ingesting)
     ingest = load_ingest_settings() if ingesting else None
     since = parse_since(args.since or DEFAULT_SINCE, datetime.now(UTC))
-    return _Job(paths, _build_agents(settings), ingest, since)
+    agents = _build_agents(settings, visuals=not getattr(args, "no_visuals", False))
+    return _Job(paths, agents, ingest, since)
 
 
 class IngestRunError(Exception):
@@ -280,7 +316,12 @@ def _final_summary(final: _FinalCritique | Exception) -> Mapping[str, Any] | Non
 
 
 def _notes_text(
-    pipe: _Pipeline, run: EditorRun, version: int, final: _FinalCritique | Exception, name: str
+    pipe: _Pipeline,
+    run: EditorRun,
+    version: int,
+    final: _FinalCritique | Exception,
+    name: str,
+    visuals: str,
 ) -> str:
     summary = run.summary or (f"Editor stopped early: {run.error}" if run.error else "")
     notes = NotesInput(
@@ -291,11 +332,54 @@ def _notes_text(
         summary=summary,
         dropped=dropped_links(run.files, version),
         final_summary=_final_summary(final),
+        visuals=visuals,
     )
     return render_notes(notes)
 
 
-def _write_draft(job: _Job, draft: str, version: int) -> bool:
+def _illustrate(job: _Job, pipe: _Pipeline, draft: str) -> tuple[str, str]:
+    """``(draft to write, Visuals notes)``; a failure keeps the plain draft and is reported."""
+    agents = job.agents
+    try:
+        _clear_images(job.paths.images)  # old visuals never match the new draft
+    except OSError as exc:
+        print(f"Could not clear old visuals: {exc}", file=sys.stderr)
+        return draft, f"- Could not clear old visuals: {exc}"
+    if agents.illustrator is None:
+        return draft, VISUALS_OFF
+    try:
+        result: Illustration = illustrate(
+            agents.illustrator,
+            draft,
+            pipe.inputs.docs,
+            max_visuals=agents.max_visuals,
+            image_dir=job.paths.images.name,
+        )
+        write_visuals(result, job.paths.images)
+    except Exception as exc:  # network/API/model-output/write failures: visuals are optional
+        logger.debug("Illustrator failed", exc_info=True)
+        print(f"Illustrator failed: {exc} (draft kept without visuals)", file=sys.stderr)
+        return draft, f"- Illustrator failed: {exc}"
+    animated = sum(1 for v in result.visuals if v.animated)
+    print(
+        f"Visuals: {len(result.visuals)} placed ({animated} animated), "
+        f"{len(result.rejected)} dropped -> {job.paths.images}"
+    )
+    return result.draft, render_visual_notes(result)
+
+
+def _clear_images(images: Path) -> None:
+    """Remove an earlier run's visuals (only reached under --overwrite or an empty folder).
+
+    Only ``visual-N.svg``/``.mmd`` files go: anything else Varun put there stays."""
+    if images.is_dir():
+        for old in images.iterdir():
+            if OWN_VISUAL.fullmatch(old.name) and (old.is_file() or old.is_symlink()):
+                old.unlink()
+
+
+def _write_draft(job: _Job, draft: str, version: int, prose: str | None = None) -> bool:
+    """Write ``draft``; the word count is of ``prose`` (the draft without visuals)."""
     if not write_reported(job.paths.draft, draft, "draft"):
         return False
     try:
@@ -303,7 +387,8 @@ def _write_draft(job: _Job, draft: str, version: int) -> bool:
     except OSError as exc:
         print(f"Could not remove the old critique: {exc}", file=sys.stderr)
         return False
-    print(f"Wrote {job.paths.draft} ({prose_words(draft)} words, final draft v{version})")
+    words = prose_words(draft if prose is None else prose)
+    print(f"Wrote {job.paths.draft} ({words} words, final draft v{version})")
     return True
 
 
@@ -325,12 +410,13 @@ def _finalise(job: _Job, pipe: _Pipeline, run: EditorRun) -> int:
         errors = "; ".join(error_lines(run.files))
         print(f"Editor finished without a draft. {errors}".rstrip(), file=sys.stderr)
         return EXIT_ERROR
-    if not _write_draft(job, draft, version):
+    placed, visuals = _illustrate(job, pipe, draft)
+    if not _write_draft(job, placed, version, prose=draft):
         return EXIT_ERROR
-    final = _try_critique(pipe, run, draft, version)
+    final = _try_critique(pipe, run, draft, version)  # the critique judges the prose only
     print(_progress(run.files, version, _final_summary(final)))
     code = _write_critique(job, final)  # before the notes: a notes failure must not lose it
-    notes = _notes_text(pipe, run, version, final, job.paths.draft.name)
+    notes = _notes_text(pipe, run, version, final, job.paths.draft.name, visuals)
     if not write_reported(job.paths.notes, notes, "notes"):
         return EXIT_ERROR
     print(f"Notes -> {job.paths.notes}")
