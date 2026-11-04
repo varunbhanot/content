@@ -6,13 +6,19 @@ from dataclasses import dataclass
 from typing import Any
 
 from deepagents import CompiledSubAgent, FilesystemPermission, create_deep_agent
-from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelRequest,
+    ModelResponse,
+    TodoListMiddleware,
+)
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph.state import CompiledStateGraph
 
 from newsletter_machine.agent import extract_text
+from newsletter_machine.model_middleware import model_retry
 from newsletter_machine.prompts import Prompt, load_prompt, render
 from newsletter_machine.sources import SourceDoc
 from newsletter_machine.workspace import DRAFTS_DIR, PLAN_FILE, latest_version
@@ -21,7 +27,8 @@ from newsletter_machine.writer import angle_line, neutralise_tags, usable_source
 logger = logging.getLogger(__name__)
 
 EDITOR_NAME = "editor"
-EDITOR_RECURSION_LIMIT = 120  # ~55 model turns: room for 3 revisions plus reads and todos
+EDITOR_STEPS_PER_TURN = 3  # model, TodoListMiddleware.after_model, tools
+EDITOR_RECURSION_LIMIT = 55 * EDITOR_STEPS_PER_TURN  # ~55 turns: 3 revisions, reads, todos
 EDITOR_THREAD = "issue"  # one in-memory thread per editor; lets a failed run be salvaged
 EDITOR_PERMISSIONS = [  # first match wins: the lead may write its plan and nothing else
     FilesystemPermission(operations=["write"], paths=[PLAN_FILE], mode="allow"),
@@ -66,9 +73,12 @@ class SerialToolCalls(AgentMiddleware[Any, Any, Any]):
 
 
 def editor_middleware(model: BaseChatModel) -> list[AgentMiddleware[Any, Any, Any]]:
-    """Serial tool calls where the provider supports the switch (Anthropic); the sub-agent
-    ledger still refuses stale parallel calls from any other model."""
-    return [SerialToolCalls()] if isinstance(model, ChatAnthropic) else []
+    """Retries, the ``write_todos`` tool the prompt asks for (deepagents' default stack has
+    no todo middleware), and serial tool calls where the provider supports the switch
+    (Anthropic); the sub-agent ledger still refuses stale parallel calls from other models.
+    Prompt caching needs nothing here: ``create_deep_agent`` adds it to the lead."""
+    serial = [SerialToolCalls()] if isinstance(model, ChatAnthropic) else []
+    return [model_retry(), TodoListMiddleware(), *serial]
 
 
 def editor_system_prompt(max_revisions: int, prompt: Prompt | None = None) -> str:

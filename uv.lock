@@ -1412,6 +1412,7 @@ name = "newsletter-machine"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anthropic" },
     { name = "curl-cffi" },
     { name = "deepagents" },
     { name = "google-api-python-client" },
@@ -1443,6 +1444,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anthropic", specifier = ">=2.3,<3" },
     { name = "curl-cffi", specifier = ">=0.11" },
     { name = "deepagents", specifier = ">=0.7.32,<0.8" },
     { name = "google-api-python-client", specifier = ">=2.201.0" },

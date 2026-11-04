@@ -101,8 +101,9 @@ def test_editor_can_write_only_its_plan() -> None:
 
 
 def test_recursion_limit_leaves_room_for_three_revisions() -> None:
-    # research, 4 drafts, 4 critiques, plan, reads, todos and the final message, 2 steps each
-    assert 80 <= EDITOR_RECURSION_LIMIT <= 150
+    # research, 4 drafts, 4 critiques, plan, reads, todos and the final message: ~55 turns of
+    # 3 graph steps each (model, the todo middleware's after_model hook, tools)
+    assert 150 <= EDITOR_RECURSION_LIMIT <= 200
 
 
 def test_serial_tool_calls_middleware_disables_parallel_calls() -> None:
@@ -116,14 +117,21 @@ def test_serial_tool_calls_middleware_disables_parallel_calls() -> None:
     assert seen == [{"x": 1, "parallel_tool_calls": False}]
 
 
-def test_editor_middleware_is_used_for_anthropic_models_only() -> None:
+def test_editor_middleware_retries_plans_and_serialises_anthropic_only() -> None:
     from langchain_anthropic import ChatAnthropic
 
     from newsletter_machine.editor import editor_middleware
 
-    assert editor_middleware(fake()) == []
+    assert [type(m).__name__ for m in editor_middleware(fake())] == [
+        "ModelRetryMiddleware",
+        "TodoListMiddleware",
+    ]
     anthropic = ChatAnthropic(model_name="m", api_key="k")  # type: ignore[call-arg]
-    assert [type(m).__name__ for m in editor_middleware(anthropic)] == ["SerialToolCalls"]
+    assert [type(m).__name__ for m in editor_middleware(anthropic)] == [
+        "ModelRetryMiddleware",
+        "TodoListMiddleware",
+        "SerialToolCalls",
+    ]
 
 
 def test_run_editor_salvages_files_when_the_lead_fails_midway() -> None:
@@ -197,3 +205,27 @@ def test_serial_tool_calls_middleware_async() -> None:
     request = ModelRequest(model=fake(), messages=[], model_settings={})
     result = asyncio.run(SerialToolCalls().awrap_model_call(request, _handler))
     assert result == {"parallel_tool_calls": False}
+
+
+def test_editor_exposes_write_todos_and_keeps_the_todo_list() -> None:
+    todos = [{"content": "Brief the writer", "status": "in_progress"}]
+    plan = AIMessage(
+        content="", tool_calls=[{"name": "write_todos", "args": {"todos": todos}, "id": "t"}]
+    )
+    editor = build_editor(fake(plan, "Done."), _subagents((), ()), editor_system_prompt(1))
+    config: Any = {"configurable": {"thread_id": "t"}}
+    result = editor.invoke({"messages": [{"role": "user", "content": "task"}]}, config)
+    assert result["todos"] == todos  # an unknown tool would leave no todos, only an error
+    [reply] = [m for m in result["messages"] if getattr(m, "tool_call_id", None) == "t"]
+    assert reply.status != "error"
+
+
+def test_editor_retries_a_transient_model_failure(monkeypatch: Any) -> None:
+    from fakes import connection_error, flaky
+
+    monkeypatch.setattr("langchain.agents.middleware.model_retry.time.sleep", lambda _: None)
+    lead = flaky([connection_error()], "All done.")
+    editor = build_editor(lead, _subagents((), ()), editor_system_prompt(1))
+    run = run_editor(editor, "task", {})
+    assert run.summary == "All done."
+    assert lead.calls == 2

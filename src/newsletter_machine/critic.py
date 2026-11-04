@@ -13,6 +13,7 @@ from newsletter_machine.agent import AgentOutputError
 from newsletter_machine.checklist import Checklist, ChecklistItem
 from newsletter_machine.checks import CheckResult, run_mechanical
 from newsletter_machine.grounding import Grounding, format_checklist
+from newsletter_machine.model_middleware import subagent_middleware
 from newsletter_machine.prompts import Prompt, load_prompt, render
 from newsletter_machine.sources import SourceDoc
 from newsletter_machine.writer import format_sources, neutralise_tags
@@ -96,6 +97,7 @@ def build_critic(model: BaseChatModel, system_prompt: str) -> CompiledSubAgent:
         tools=[],
         system_prompt=system_prompt,
         response_format=CriticOutput,
+        middleware=subagent_middleware(model),
         name=CRITIC_NAME,
     )
     return CompiledSubAgent(name=CRITIC_NAME, description=CRITIC_DESCRIPTION, runnable=runnable)

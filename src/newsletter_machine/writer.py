@@ -11,6 +11,7 @@ from langchain_core.language_models import BaseChatModel
 
 from newsletter_machine.agent import AgentOutputError, extract_text
 from newsletter_machine.grounding import Grounding, format_checklist, format_samples
+from newsletter_machine.model_middleware import subagent_middleware
 from newsletter_machine.prompts import Prompt, load_prompt, render
 from newsletter_machine.sources import SourceDoc
 
@@ -96,7 +97,13 @@ def writer_task(docs: Iterable[SourceDoc], angle: str | None) -> str:
 
 def build_writer(model: BaseChatModel, system_prompt: str) -> CompiledSubAgent:
     """A tool-less agent, usable directly or as a deep agent's ``task`` sub-agent (Phase 4)."""
-    runnable = create_agent(model, tools=[], system_prompt=system_prompt, name=WRITER_NAME)
+    runnable = create_agent(
+        model,
+        tools=[],
+        system_prompt=system_prompt,
+        middleware=subagent_middleware(model),
+        name=WRITER_NAME,
+    )
     return CompiledSubAgent(name=WRITER_NAME, description=WRITER_DESCRIPTION, runnable=runnable)
 
 
