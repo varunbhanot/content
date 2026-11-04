@@ -10,6 +10,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
 
 from newsletter_machine.agent import extract_text
+from newsletter_machine.model_middleware import model_retry
 from newsletter_machine.prompts import Prompt, load_prompt, render
 from newsletter_machine.sources import SourceDoc
 from newsletter_machine.writer import angle_line, format_source, usable_sources
@@ -33,8 +34,18 @@ def researcher_system_prompt(prompt: Prompt | None = None) -> str:
 
 
 def build_researcher(model: BaseChatModel, system_prompt: str) -> Runnable[Any, Any]:
-    """A tool-less agent that reads one source per call."""
-    return create_agent(model, tools=[], system_prompt=system_prompt, name=RESEARCHER_NAME)
+    """A tool-less agent that reads one source per call.
+
+    Retries only, no prompt caching: its system prompt is below the cacheable minimum and
+    each call's source text is unique, so a cache write would cost more than it saves.
+    """
+    return create_agent(
+        model,
+        tools=[],
+        system_prompt=system_prompt,
+        middleware=[model_retry()],
+        name=RESEARCHER_NAME,
+    )
 
 
 def research_task(doc: SourceDoc, index: int, angle: str | None) -> str:

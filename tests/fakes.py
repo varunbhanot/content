@@ -4,6 +4,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import anthropic
+import httpx2
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 
@@ -47,3 +49,36 @@ def task_call(subagent: str, description: str, call_id: str) -> AIMessage:
     """A lead-agent turn that delegates to ``subagent``."""
     args = {"description": description, "subagent_type": subagent}
     return AIMessage(content="", tool_calls=[{"name": "task", "args": args, "id": call_id}])
+
+
+class FlakyModel(FakeModel):
+    """A scripted model that raises each of ``failures`` in turn before replying."""
+
+    failures: list[Exception] = []
+    calls: int = 0
+
+    def _generate(self, *args: Any, **kwargs: Any) -> Any:
+        self.calls += 1
+        if self.failures:
+            raise self.failures.pop(0)
+        return super()._generate(*args, **kwargs)
+
+
+def flaky(failures: Sequence[Exception], *replies: AIMessage | str) -> FlakyModel:
+    messages = [r if isinstance(r, AIMessage) else AIMessage(content=r) for r in replies]
+    return FlakyModel(messages=iter(messages), failures=list(failures))
+
+
+API_REQUEST = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+
+
+def status_error(
+    cls: type[anthropic.APIStatusError], status: int, headers: dict[str, str] | None = None
+) -> anthropic.APIStatusError:
+    """An Anthropic SDK HTTP error, as the client raises it once its own retries give up."""
+    response = httpx2.Response(status, headers=headers, request=API_REQUEST)
+    return cls("boom", response=response, body=None)
+
+
+def connection_error() -> anthropic.APIConnectionError:
+    return anthropic.APIConnectionError(request=API_REQUEST)
