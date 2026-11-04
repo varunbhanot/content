@@ -192,12 +192,20 @@ def load_planner_model(settings: Settings, env: Mapping[str, str] | None = None)
     )
 
 
+def _model_or(name: str, fallback: str, env: Mapping[str, str] | None) -> str:
+    """The ``provider:model`` in env var ``name``, or ``fallback`` when it is blank."""
+    env = _load_env(env)
+    return _require_provider_prefix(name, env.get(name, "").strip() or fallback)
+
+
 def load_relevance_model(settings: Settings, env: Mapping[str, str] | None = None) -> str:
     """``NM_RELEVANCE_MODEL`` for the series relevance filter (blank = the fast model)."""
-    env = _load_env(env)
-    return _require_provider_prefix(
-        "NM_RELEVANCE_MODEL", env.get("NM_RELEVANCE_MODEL", "").strip() or settings.fast_model
-    )
+    return _model_or("NM_RELEVANCE_MODEL", settings.fast_model, env)
+
+
+def load_summary_model(settings: Settings, env: Mapping[str, str] | None = None) -> str:
+    """``NM_SUMMARY_MODEL`` for a drafted series part's one-line summary (blank = fast model)."""
+    return _model_or("NM_SUMMARY_MODEL", settings.fast_model, env)
 
 
 def load_runner_model(env: Mapping[str, str] | None = None) -> str:

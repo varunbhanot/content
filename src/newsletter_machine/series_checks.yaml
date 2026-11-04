@@ -1,0 +1,53 @@
+# Series-only critic checks, added to voice/critic-checklist.yaml on `issue --series` runs.
+#
+# Same fields and validation as voice/critic-checklist.yaml (each item cites a "## " section
+# of the style guide). Code picks the items that apply to the part being drafted:
+#   series-link-back         from Part 2 on
+#   series-teaser-delivered  from Part 2 on, when the previous part recorded a teaser
+#   series-next-teaser       every part but the last
+#   series-final-no-teaser   the last part only (checked by code)
+# $placeholders are filled from the approved outline: $previous_number, $previous_title,
+# $previous_link, $next_number, $next_title, $next_question. The previous part's summary and
+# teaser are written by models from the draft, so they reach the critic as data in its user
+# message (<series_context>), never here.
+
+version: 1
+items:
+  - id: series-link-back
+    section: Openings
+    rule: >-
+      Open with a one-clause link back to Part $previous_number ("$previous_title",
+      $previous_link), then move on to this part.
+    check: >-
+      Fail if the opening does not link back to Part $previous_number (a Markdown link, or a
+      [VARUN: ...] marker for the link when it is not published yet), or if the recap runs
+      longer than one clause. The link-back clause may come before the opening move; judge
+      opening-move on what follows it. A recap or callback that matches Part
+      $previous_number's summary in the series context is not an invented fact.
+    severity: must
+
+  - id: series-teaser-delivered
+    section: Openings
+    rule: Deliver what Part $previous_number's closing teaser promised this part would cover.
+    check: >-
+      Part $previous_number's closing teaser is in the series context of the user message.
+      Fail if this draft does not deliver that promise; quote the closest passage and say
+      what is missing.
+    severity: must
+
+  - id: series-next-teaser
+    section: Closings
+    rule: >-
+      End, just before the Sources list, with one line in italics pointing to Part
+      $next_number ("$next_title": $next_question), starting "Next in this series:".
+    check: >-
+      Fail if there is no single italic line starting "Next in this series" at the end of
+      the article, or if it points to something other than Part $next_number, "$next_title".
+    severity: should
+
+  - id: series-final-no-teaser
+    section: Closings
+    rule: This is the final part of the series; do not end with a "Next in this series" line.
+    check: Any emphasised line opening with "Next in this series" is a hit.
+    severity: must
+    patterns: ['(?m)^[ \t]*(?:>[ \t]*)?[*_]+next in this series\b']
