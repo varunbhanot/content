@@ -8,6 +8,7 @@ import anthropic
 import httpx2
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 
 from newsletter_machine.critic import judgement_items
 from newsletter_machine.grounding import load_grounding
@@ -82,3 +83,26 @@ def status_error(
 
 def connection_error() -> anthropic.APIConnectionError:
     return anthropic.APIConnectionError(request=API_REQUEST)
+
+
+class RelevanceFake(FakeModel):
+    """A content-aware relevance classifier: batches run concurrently, so replies cannot be
+    scripted in order. A task naming an ``off`` word is off-topic; a ``fail`` word raises."""
+
+    off: tuple[str, ...] = ()
+    fail: tuple[str, ...] = ()
+    calls: int = 0
+
+    def _generate(self, messages: Any, *args: Any, **kwargs: Any) -> ChatResult:
+        self.calls += 1
+        task = str(messages[-1].content)
+        if any(word in task for word in self.fail):
+            raise ConnectionResetError("classifier down")
+        off = next((word for word in self.off if word in task), None)
+        args_ = {"on_topic": off is None, "reason": f"about {off}" if off else "on the topic"}
+        call = {"name": "RelevanceVerdict", "args": args_, "id": f"r{self.calls}"}
+        return ChatResult(generations=[ChatGeneration(message=AIMessage("", tool_calls=[call]))])
+
+
+def relevance_fake(off: Sequence[str] = (), fail: Sequence[str] = ()) -> RelevanceFake:
+    return RelevanceFake(messages=iter(()), off=tuple(off), fail=tuple(fail))

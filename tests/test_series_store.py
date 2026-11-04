@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 from newsletter_machine.series import Series, SeriesPart, SourceRef
 from newsletter_machine.series_store import (
@@ -9,7 +10,10 @@ from newsletter_machine.series_store import (
     check_approval,
     check_can_plan,
     declared_status,
+    draft_location,
+    draft_reference,
     load_series,
+    mark_drafted,
     render_series_yaml,
     save_approval,
     save_series,
@@ -289,3 +293,124 @@ def test_declared_status_of_unreadable_file_is_none(tmp_path: Path) -> None:
 
     assert declared_status(tmp_path / "binary.yaml") is None
     assert approved_slugs(tmp_path) == ()
+
+
+def _approved_file(series_dir: Path) -> Path:
+    path = _save(series_dir, "evals", status="approved")
+    text = path.read_text().replace("- number: 2\n", "- number: 2  # Varun: keep this one short\n")
+    path.write_text(text)
+    return path
+
+
+def test_mark_drafted_flips_one_part_and_keeps_comments(tmp_path: Path) -> None:
+    path = _approved_file(tmp_path)
+    assert mark_drafted(path, "evals", 2, "drafts/2026-11-04.md") is True
+    text = path.read_text()
+    assert "# Varun: keep this one short" in text
+    series = load_series(path)
+    assert [p.status for p in series.parts] == ["planned", "drafted", "planned"]
+    assert series.parts[1].draft == "drafts/2026-11-04.md"
+    assert series.parts[0].draft is None and series.parts[2].draft is None
+
+
+def test_mark_drafted_quotes_an_odd_draft_path(tmp_path: Path) -> None:
+    path = _approved_file(tmp_path)
+    assert mark_drafted(path, "evals", 1, "drafts/a: b #1.md") is True
+    assert load_series(path).parts[0].draft == "drafts/a: b #1.md"
+
+
+def test_mark_drafted_rewrites_the_file_when_the_lines_are_written_another_way(
+    tmp_path: Path,
+) -> None:
+    path = _save(tmp_path, "evals", status="approved")
+    data = yaml.safe_load(path.read_text())
+    path.write_text(yaml.safe_dump(data, default_flow_style=True))  # flow style: no part lines
+    assert mark_drafted(path, "evals", 3, "drafts/x.md") is False
+    series = load_series(path)
+    assert series.parts[2].status == "drafted" and series.parts[2].draft == "drafts/x.md"
+    assert path.read_text().startswith("# Series plan: evals.")
+
+
+def test_mark_drafted_refuses_a_part_that_is_no_longer_planned(tmp_path: Path) -> None:
+    path = _approved_file(tmp_path)
+    mark_drafted(path, "evals", 1, "drafts/x.md")
+    before = path.read_text()
+    with pytest.raises(ValueError, match="Part 1 is drafted, not planned"):
+        mark_drafted(path, "evals", 1, "drafts/y.md")
+    assert path.read_text() == before
+
+
+def test_mark_drafted_refuses_a_missing_part(tmp_path: Path) -> None:
+    path = _approved_file(tmp_path)
+    with pytest.raises(ValueError, match="no Part 9"):
+        mark_drafted(path, "evals", 9, "drafts/x.md")
+
+
+def test_mark_drafted_reports_an_invalid_file(tmp_path: Path) -> None:
+    path = _approved_file(tmp_path)
+    path.write_text("topic: [broken\n")
+    with pytest.raises(ValueError, match="invalid YAML"):
+        mark_drafted(path, "evals", 1, "drafts/x.md")
+
+
+def test_mark_drafted_keeps_a_column_0_comment_inside_a_part(tmp_path: Path) -> None:
+    path = _save(tmp_path, "evals", status="approved")
+    text = path.read_text().replace(
+        "  status: planned", "# TODO tighten this brief\n  status: planned", 1
+    )
+    path.write_text(text)
+    assert mark_drafted(path, "evals", 1, "drafts/x.md") is True
+    assert "# TODO tighten this brief" in path.read_text()
+    assert load_series(path).parts[0].status == "drafted"
+
+
+def test_mark_drafted_adds_a_missing_draft_key(tmp_path: Path) -> None:
+    path = _approved_file(tmp_path)
+    path.write_text(path.read_text().replace("  draft: null\n", "", 1))  # part 1 has no draft key
+    assert mark_drafted(path, "evals", 1, "drafts/x.md") is True
+    assert "# Varun: keep this one short" in path.read_text()
+    assert load_series(path).parts[0].draft == "drafts/x.md"
+
+
+def test_mark_drafted_rewrites_when_the_line_edit_would_not_parse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from newsletter_machine import series_store
+
+    path = _approved_file(tmp_path)
+    monkeypatch.setattr(series_store, "_drafted_text", lambda *a: "topic: [broken\n")
+    assert mark_drafted(path, "evals", 1, "drafts/x.md") is False
+    assert load_series(path).parts[0].status == "drafted"
+
+
+def test_mark_drafted_refuses_a_series_no_longer_approved(tmp_path: Path) -> None:
+    path = _save(tmp_path, "evals", status="proposed")
+    with pytest.raises(ValueError, match="now proposed, no longer approved"):
+        mark_drafted(path, "evals", 1, "drafts/x.md")
+
+
+def test_draft_reference_is_relative_to_the_folder_holding_series(tmp_path: Path) -> None:
+    path = tmp_path / "series" / "evals.yaml"
+    draft = tmp_path / "drafts" / "2026-11-04.md"
+    assert draft_reference(path, draft) == "drafts/2026-11-04.md"
+    assert draft_location(path, "drafts/2026-11-04.md") == draft.resolve()
+    assert draft_location(path, str(draft)) == draft.resolve()  # absolute stays absolute
+
+
+def test_draft_reference_falls_back_to_absolute_across_drives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from newsletter_machine import series_store
+
+    def _no_relpath(*args: object) -> str:
+        raise ValueError("path is on mount 'D:'")
+
+    monkeypatch.setattr(series_store.os.path, "relpath", _no_relpath)
+    draft = tmp_path / "d.md"
+    assert draft_reference(tmp_path / "series" / "evals.yaml", draft) == draft.resolve().as_posix()
+
+
+def test_mark_drafted_keeps_comments_when_draft_is_written_as_capital_null(tmp_path: Path) -> None:
+    path = _approved_file(tmp_path)
+    path.write_text(path.read_text().replace("  draft: null\n", "  draft: Null\n", 1))
+    assert mark_drafted(path, "evals", 1, "drafts/x.md") is True

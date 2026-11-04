@@ -192,6 +192,14 @@ def load_planner_model(settings: Settings, env: Mapping[str, str] | None = None)
     )
 
 
+def load_relevance_model(settings: Settings, env: Mapping[str, str] | None = None) -> str:
+    """``NM_RELEVANCE_MODEL`` for the series relevance filter (blank = the fast model)."""
+    env = _load_env(env)
+    return _require_provider_prefix(
+        "NM_RELEVANCE_MODEL", env.get("NM_RELEVANCE_MODEL", "").strip() or settings.fast_model
+    )
+
+
 def load_runner_model(env: Mapping[str, str] | None = None) -> str:
     """The hosted runner's model: ``NM_RUNNER_MODEL``, else ``NM_FAST_MODEL`` (it only calls
     one tool)."""

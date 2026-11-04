@@ -21,6 +21,7 @@ from newsletter_machine.cli_common import EXIT_CONFIG, EXIT_ERROR
 from newsletter_machine.cli_issue import IssuePaths, issue_paths
 from newsletter_machine.config import SubstackSettings, WeeklySettings
 from newsletter_machine.delivery import Delivery, Mailbox, deliver
+from newsletter_machine.series_store import DEFAULT_SERIES_DIR
 from newsletter_machine.substack_draft import (
     SubstackClient,
     create_substack_draft,
@@ -84,7 +85,14 @@ def issue_date(now: datetime, timezone: ZoneInfo) -> date:
 def issue_args(out: Path, *, overwrite: bool = False) -> argparse.Namespace:
     """The arguments ``issue --out OUT`` parses to: Gmail links, default window, no angle."""
     return argparse.Namespace(
-        out=out, angle=None, sources=None, links_file=None, since=None, overwrite=overwrite
+        out=out,
+        angle=None,
+        series=None,  # Phase 5 of series mode passes the approved series here
+        series_dir=DEFAULT_SERIES_DIR,
+        sources=None,
+        links_file=None,
+        since=None,
+        overwrite=overwrite,
     )
 
 

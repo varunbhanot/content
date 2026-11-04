@@ -306,3 +306,13 @@ def test_substack_skips_a_draft_kept_after_a_failure(tmp_path: Path) -> None:
     deps = WeeklyDeps(_issue(1), FakeMailbox(), lambda s: client)
     report = run_weekly(tmp_path, NOW, _settings(SubstackSettings(PUB, cookies="c")), deps)
     assert report.status == "drafted" and client.calls == []
+
+
+def test_issue_args_match_what_the_issue_parser_produces(tmp_path: Path) -> None:
+    from newsletter_machine.cli import _build_parser
+    from newsletter_machine.weekly import issue_args
+
+    out = tmp_path / "2026-11-04.md"
+    parsed = vars(_build_parser().parse_args(["issue", "--out", str(out)]))
+    parsed.pop("command")
+    assert vars(issue_args(out)) == parsed

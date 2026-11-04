@@ -146,8 +146,8 @@ Must-haves only, enough to draft evals Part 1 this week: `series plan`, `series 
 
 | # | Phase | Description | Status | Parallel | Depends | PRP Plan |
 |---|-------|-------------|--------|----------|---------|----------|
-| 1 | Series plan & approve | Series file format, `series plan` from saved sources, `series approve` | in-progress | - | - | [series-mode-phase-1-series-plan.plan.md](../plans/series-mode-phase-1-series-plan.plan.md) |
-| 2 | Draft a series part | `issue --series`: relevance filter, parked list, part brief injected, part marked drafted | pending | - | 1 | - |
+| 1 | Series plan & approve | Series file format, `series plan` from saved sources, `series approve` | complete | - | - | [series-mode-phase-1-series-plan.plan.md](../plans/completed/series-mode-phase-1-series-plan.plan.md) |
+| 2 | Draft a series part | `issue --series`: relevance filter, parked list, part brief injected, part marked drafted | in-progress | - | 1 | [series-mode-phase-2-series-draft.plan.md](../plans/series-mode-phase-2-series-draft.plan.md) |
 | 3 | Continuity | `series published`, part summaries, recap and teaser carried forward, critic checks | pending | with 4, 5 | 2 | - |
 | 4 | Outline adjustment | Re-plan remaining parts from the week's on-topic links; Varun re-approves | pending | with 3, 5 | 2 | - |
 | 5 | Weekly run integration | Scheduled run picks up the active series automatically | pending | with 3, 4 | 2 | - |

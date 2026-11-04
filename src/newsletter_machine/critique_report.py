@@ -15,6 +15,7 @@ class ReportMeta:
     writer_version: int
     critic_version: int
     checklist_version: int
+    series: str = ""  # e.g. "Series 'evals', Part 1 of 4: <title> (free)"; blank for a plain issue
 
 
 def _blockquote(text: str) -> str:
@@ -49,6 +50,7 @@ def render_critique(critique: Critique, meta: ReportMeta) -> str:
     lines = [
         f"# Voice critique: {meta.draft_name}",
         "",
+        *([meta.series, ""] if meta.series else []),  # plain: a title may hold * or _
         f"{meta.words} words. {critique.passed} passed, {critique.failed} failed, "
         f"{critique.not_checked} not checked.",
         "",

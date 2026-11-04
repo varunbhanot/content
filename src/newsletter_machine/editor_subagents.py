@@ -84,6 +84,7 @@ class EditorInputs:
     draft_name: str
     writer_version: int
     critic_version: int
+    series_label: str = ""  # names the series part in critique reports; blank otherwise
 
 
 @dataclass(frozen=True)
@@ -170,6 +171,7 @@ def critique_version(
         writer_version=inputs.writer_version,
         critic_version=inputs.critic_version,
         checklist_version=inputs.checklist.version,
+        series=inputs.series_label,
     )
     summary = {
         "version": version,

@@ -3,7 +3,9 @@
 Only one series may be ``approved`` (active) at a time, so the weekly run is unambiguous.
 """
 
+import json
 import logging
+import os
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -12,7 +14,13 @@ import yaml
 
 from newsletter_machine.drafting import write_atomic
 from newsletter_machine.ingest import YAML_LINE_WIDTH
-from newsletter_machine.series import Series, is_slug, parse_series, series_to_mapping
+from newsletter_machine.series import (
+    Series,
+    SeriesPart,
+    is_slug,
+    parse_series,
+    series_to_mapping,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -162,3 +170,93 @@ def save_approval(approval: Approval) -> None:
         return
     write_atomic(approval.path, approval.text)
     logger.info("Approved %s", approval.path)
+
+
+def _part_block(text: str, number: int) -> tuple[int, int, str] | None:
+    """``(start, end, key indent)`` of part ``number``'s block in block-style YAML."""
+    start = re.search(rf"^([ \t]*)- number:[ \t]*{number}[ \t]*(?:#.*)?$", text, re.MULTILINE)
+    if start is None:
+        return None
+    indent = start.group(1)
+    # the next part, or a top-level key; a column-0 comment stays inside the block
+    after = re.compile(rf"^(?:{indent}-[ \t]|[^\s#])", re.MULTILINE)
+    end = after.search(text, start.end())
+    return start.end(), end.start() if end else len(text), f"{indent}  "
+
+
+def _drafted_text(text: str, number: int, draft: str) -> str | None:
+    """Edit only part ``number``'s ``status`` and ``draft`` lines (adding ``draft`` after
+    ``status`` when the key is missing); None when the status line is written another way."""
+    block = _part_block(text, number)
+    if block is None:
+        return None
+    start, end, key = block
+    body = text[start:end]
+    status = re.compile(rf"^{key}status:[ \t]*(['\"]?)planned\1([ \t]+#.*)?[ \t]*$", re.MULTILINE)
+    path = re.compile(
+        rf"^{key}draft:[ \t]*(?:null|Null|NULL|~|''|\"\")?([ \t]+#.*)?[ \t]*$", re.MULTILINE
+    )
+    has_draft_key = re.search(rf"^{key}draft:", body, re.MULTILINE) is not None
+    line = f"{key}draft: {json.dumps(draft, ensure_ascii=False)}"  # JSON strings are valid YAML
+    added = "" if has_draft_key else f"\n{line}"
+    body, flipped = status.subn(lambda m: f"{key}status: drafted{m.group(2) or ''}{added}", body, 1)
+    body, pointed = path.subn(lambda m: f"{line}{m.group(1) or ''}", body, 1)
+    return text[:start] + body + text[end:] if flipped and (pointed or added) else None
+
+
+def _parses_to(path: Path, text: str | None, expected: Series) -> bool:
+    if text is None:
+        return False
+    try:
+        return _parse_text(path, text) == expected
+    except ValueError:  # the line edit broke the YAML: fall back to a full rewrite
+        return False
+
+
+def _drafted_series(path: Path, series: Series, number: int, draft: str) -> Series:
+    part = next((p for p in series.parts if p.number == number), None)
+    if part is None:
+        raise ValueError(f"{path} has no Part {number}.")
+    if part.status != "planned":
+        raise ValueError(f"{path}: Part {number} is {part.status}, not planned.")
+    if series.status != "approved":
+        raise ValueError(f"{path} is now {series.status}, no longer approved.")
+    drafted: SeriesPart = replace(part, status="drafted", draft=draft)
+    parts = tuple(drafted if p.number == number else p for p in series.parts)
+    return replace(series, parts=parts)
+
+
+def mark_drafted(path: Path, slug: str, number: int, draft: str) -> bool:
+    """Mark part ``number`` drafted with its draft path, re-reading the file first (Varun may
+    have edited it during the run). Only two lines change, so comments survive; returns
+    False when the file had to be rewritten in full instead."""
+    text = _read(path)
+    expected = _drafted_series(path, _parse_text(path, text), number, draft)
+    edited = _drafted_text(text, number, draft)
+    kept = _parses_to(path, edited, expected)
+    if kept and edited is not None:
+        write_atomic(path, edited)
+    else:
+        save_series(path, expected, slug)  # checks the rewrite loads before writing
+    logger.info("Marked part %d of %s drafted (%s)", number, path, draft)
+    return kept
+
+
+def _project_root(path: Path) -> Path:
+    """The folder holding the series folder (the repo, for ``series/<slug>.yaml``)."""
+    return path.resolve().parent.parent
+
+
+def draft_reference(path: Path, draft: Path) -> str:
+    """How the series file at ``path`` records ``draft``: relative to the folder holding the
+    series folder (``drafts/2026-11-04.md``), so it reads the same from any working directory;
+    absolute when the draft lives on another drive."""
+    try:
+        return Path(os.path.relpath(draft.resolve(), _project_root(path))).as_posix()
+    except ValueError:  # Windows: a different drive has no relative path
+        return draft.resolve().as_posix()
+
+
+def draft_location(path: Path, reference: str) -> Path:
+    """The absolute draft path a series file's ``draft`` field names (see ``draft_reference``)."""
+    return (_project_root(path) / reference).resolve()

@@ -143,3 +143,37 @@ def test_render_notes_maps_source_numbers_to_usable_sources() -> None:
     )
     assert "- [2] B (https://e.com/b)" in notes
     assert "- [3] D [beta] (https://e.com/d)" in notes
+
+
+def test_render_notes_has_a_series_section_with_parked_sources() -> None:
+    notes = render_notes(
+        NotesInput(
+            "i.md",
+            1,
+            {},
+            DOCS[:1],
+            "",
+            (),
+            series="Series 'evals', Part 1 of 4: Why demos lie (free)",
+            parked=("- [Pricing](https://e.com/p): about pricing, not evals",),
+        )
+    )
+    assert "## Series\n\nSeries 'evals', Part 1 of 4: Why demos lie (free)" in notes
+    assert "Parked (off-topic, not used):\n- [Pricing](https://e.com/p): about pricing" in notes
+    assert notes.index("## Series") < notes.index("## Editor's summary")
+
+
+def test_render_notes_says_nothing_was_parked() -> None:
+    notes = render_notes(NotesInput("i.md", 1, {}, DOCS[:1], "", (), series="Series 'evals'"))
+    assert "Parked (off-topic, not used): none" in notes
+
+
+def test_render_notes_has_no_series_section_for_a_plain_issue() -> None:
+    assert "## Series" not in render_notes(NotesInput("i.md", 1, {}, DOCS[:1], "", ()))
+
+
+def test_render_notes_lists_sources_kept_unchecked() -> None:
+    notes = render_notes(
+        NotesInput("i.md", 1, {}, DOCS[:1], "", (), series="S", unchecked=("- x: boom",))
+    )
+    assert "Unchecked (relevance check failed, kept):\n- x: boom" in notes

@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from newsletter_machine.checklist import ChecklistItem
 from newsletter_machine.checks import CheckResult
 from newsletter_machine.critic import Critique
@@ -75,3 +77,10 @@ def test_render_critique_quotes_every_line_of_a_multiline_quote() -> None:
     text = render_critique(Critique(results=(result,), summary="s"), META)
     assert "> one\n>\n> ## Two" in text
     assert "\n## Two" not in text
+
+
+def test_render_critique_names_the_series_part_when_given() -> None:
+    meta = replace(META, series="Series 'evals', Part 1 of 4: Why demos lie (free)")
+    text = render_critique(_critique(), meta)
+    assert "\nSeries 'evals', Part 1 of 4: Why demos lie (free)\n" in text
+    assert "Series" not in render_critique(_critique(), META)

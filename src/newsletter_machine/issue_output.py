@@ -102,6 +102,9 @@ class NotesInput:
     summary: str
     dropped: tuple[str, ...]
     final_summary: Mapping[str, Any] | None = None  # the final version's critique counts
+    series: str = ""  # the series part this draft is, blank for a plain issue
+    parked: tuple[str, ...] = ()  # one line per source the relevance filter set aside
+    unchecked: tuple[str, ...] = ()  # sources kept because their relevance check failed
 
 
 def critique_summary(files: Files, version: int) -> dict[str, Any] | None:
@@ -162,6 +165,19 @@ def _section(title: str, body: str) -> str:
     return f"## {title}\n\n{body.strip()}"
 
 
+def _listed(title: str, lines: tuple[str, ...]) -> str:
+    return f"{title}:\n" + "\n".join(lines) if lines else f"{title}: none"
+
+
+def _series(notes: NotesInput) -> list[str]:
+    if not notes.series:
+        return []
+    body = [notes.series, _listed("Parked (off-topic, not used)", notes.parked)]
+    if notes.unchecked:
+        body.append(_listed("Unchecked (relevance check failed, kept)", notes.unchecked))
+    return [_section("Series", "\n\n".join(body))]
+
+
 def render_notes(notes: NotesInput) -> str:
     """Everything behind the draft: run log, source problems, plan, last brief, research."""
     files, version = notes.files, notes.final_version
@@ -171,6 +187,7 @@ def render_notes(notes: NotesInput) -> str:
     brief = file_text(files, versioned(BRIEFS_DIR, version, "md"))
     parts = [
         f"# Editor notes: {notes.draft_name}\n\nFinal draft: v{version}.",
+        *_series(notes),
         _section("Editor's summary", notes.summary or "(no summary)"),
         _section("Run log", "\n".join(run_log)),
         _section("Sources", "\n".join(_source_lines(notes.docs, notes.dropped))),
