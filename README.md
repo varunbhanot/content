@@ -147,6 +147,28 @@ uv run newsletter-machine issue --since 7d --angle "evals are the moat" --out dr
 | [`src/newsletter_machine/prompts/editor.md`](src/newsletter_machine/prompts/editor.md) | Editor (lead) instructions; `$writer_runs`, `$max_revisions` |
 | [`src/newsletter_machine/prompts/researcher.md`](src/newsletter_machine/prompts/researcher.md) | Per-source research notes |
 
+## Plan a series
+
+`series plan` proposes a 3 to 6 part outline from the sources earlier `issue` runs saved in
+`drafts/<date>.sources/` (last 28 days by default) and writes `series/<topic>.yaml` (status
+`proposed`). Edit the file if you want, then approve it. One series is active at a time.
+
+```bash
+uv run newsletter-machine series plan evals --since 28d
+```
+
+```bash
+uv run newsletter-machine series approve evals
+```
+
+```bash
+uv run newsletter-machine series show evals
+```
+
+`--overwrite` replaces a proposed outline (an approved one is never re-planned);
+`--drafts-dir` and `--series-dir` change the folders. `NM_PLANNER_MODEL` picks the model.
+Planning instructions: [`src/newsletter_machine/prompts/planner.md`](src/newsletter_machine/prompts/planner.md).
+
 ## Weekly schedule: `weekly` and Managed Deep Agents
 
 `weekly` is `issue` made hands-off: it runs `issue` for today's date (in `NM_TIMEZONE`) on the
@@ -312,6 +334,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy src
 | `NM_FAST_MODEL` | `anthropic:claude-haiku-5-5` | Cheap summarisation model |
 | `NM_CRITIC_MODEL` | writer model | Voice critic model |
 | `NM_EDITOR_MODEL` | writer model | Lead editor model for `issue` |
+| `NM_PLANNER_MODEL` | writer model | Series planner model for `series plan` |
 | `NM_MAX_REVISIONS` | `1` | Critique → revise loops per issue (0 to 3) |
 | `NM_VOICE_DIR` | `voice` | Voice corpus root (relative to cwd) |
 | `LOG_LEVEL` | `INFO` | Logging level |

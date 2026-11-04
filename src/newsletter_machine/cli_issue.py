@@ -62,7 +62,7 @@ from newsletter_machine.editor_subagents import (
     dropped_links,
 )
 from newsletter_machine.grounding import load_grounding
-from newsletter_machine.ingest import check_out_dir, read_sources
+from newsletter_machine.ingest import SOURCES_SUFFIX, check_out_dir, read_sources
 from newsletter_machine.issue_output import (
     NotesInput,
     critique_summary,
@@ -84,7 +84,6 @@ from newsletter_machine.writer import usable_sources
 logger = logging.getLogger(__name__)
 
 NOTES_SUFFIX = ".notes.md"
-SOURCES_SUFFIX = ".sources"
 
 
 def add_issue_parser(sub: Any) -> None:

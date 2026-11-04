@@ -184,6 +184,14 @@ def load_editor_settings(
     )
 
 
+def load_planner_model(settings: Settings, env: Mapping[str, str] | None = None) -> str:
+    """``NM_PLANNER_MODEL`` for ``series plan`` (blank = the writer model)."""
+    env = _load_env(env)
+    return _require_provider_prefix(
+        "NM_PLANNER_MODEL", env.get("NM_PLANNER_MODEL", "").strip() or settings.writer_model
+    )
+
+
 def load_runner_model(env: Mapping[str, str] | None = None) -> str:
     """The hosted runner's model: ``NM_RUNNER_MODEL``, else ``NM_FAST_MODEL`` (it only calls
     one tool)."""

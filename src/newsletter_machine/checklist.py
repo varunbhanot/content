@@ -8,7 +8,7 @@ from typing import Any, Literal, get_args
 
 import yaml
 
-from newsletter_machine.validation import is_int, one_of
+from newsletter_machine.validation import is_int, non_empty_text, one_of
 
 Severity = Literal["must", "should"]
 CHECKLIST_FILE = "critic-checklist.yaml"
@@ -42,13 +42,6 @@ class ChecklistItem:
 class Checklist:
     version: int
     items: tuple[ChecklistItem, ...]
-
-
-def _text(raw: Mapping[str, Any], name: str, where: str) -> str:
-    value = raw.get(name)
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{where}: '{name}' must be non-empty text")
-    return value.strip()
 
 
 def _patterns(raw: Mapping[str, Any], where: str) -> tuple[re.Pattern[str], ...]:
@@ -105,14 +98,14 @@ def _parse_item(raw: object, path: Path, index: int, sections: tuple[str, ...]) 
         raise ValueError(f"{where}: unknown field(s) {sorted(unknown)}")
     if "allowed" in raw and not set(raw) & set(HIT_FIELDS):
         raise ValueError(f"{where}: 'allowed' only applies to patterns or max_paragraph_chars")
-    section = _text(raw, "section", where)
+    section = non_empty_text(raw, "section", where)
     if section not in sections:
         raise ValueError(f"{where}: section {section!r} is not a '## ' heading in the style guide")
     return ChecklistItem(
         id=item_id,
         section=section,
-        rule=_text(raw, "rule", where),
-        check=_text(raw, "check", where),
+        rule=non_empty_text(raw, "rule", where),
+        check=non_empty_text(raw, "check", where),
         severity=_severity(raw, where),
         patterns=_patterns(raw, where),
         allowed=_positive_int(raw, "allowed", where, minimum=0) or 0,
