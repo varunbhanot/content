@@ -16,15 +16,43 @@
 #   max_paragraph_chars  paragraphs longer than this are hits
 #   allowed              hits allowed before the item fails (default 0)
 
-version: 1
+version: 2
 items:
+  - id: author-thesis
+    section: Who's talking
+    rule: >-
+      The post makes Varun's own argument. State one thesis a practitioner would defend;
+      sources are evidence for it, not the subject of the post.
+    check: >-
+      Try to state the draft's main argument in one sentence without naming any source,
+      author or company. Fail if you cannot, or if the post is mainly a report of what
+      sources said ("X says... Y found... Z argues..."). Quote the sentence where the post
+      states its thesis, or the most report-like passage if it has none. The fix is the
+      thesis sentence to add and where.
+    severity: must
+
+  - id: sources-as-evidence
+    section: Who's talking
+    rule: >-
+      Sections follow the argument, not the sources. At most one extended case study;
+      attributed material is about a third of the body at most.
+    check: >-
+      Fail if sections are ordered source by source, if more than one case study gets
+      extended treatment, or if attributed sentences make up roughly half the body or more.
+      Delete test: remove every attributed sentence; fail if what remains is mostly
+      transitions rather than a coherent argument. Quote the section that leans hardest on
+      a source.
+    severity: must
+
   - id: practitioner-first-person
     section: Who's talking
     rule: First person, a practitioner who builds this, not a commentator.
     check: >-
       Fail if the draft reads as detached commentary ("organisations are...", "experts say")
-      with no "I" or "we" grounded in building or running the thing. Fail if it invents
-      personal experiences that are not in the sources or the angle.
+      with no "I" or "we" grounded in building or running the thing. An "I" that only reads,
+      notices or summarises ("I've read this list several times") does not count: the "I"
+      must judge, decide or build. Fail if it invents personal experiences that are not in
+      the sources or the angle.
     severity: must
 
   - id: opening-move
