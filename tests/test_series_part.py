@@ -147,7 +147,7 @@ def test_series_angle_carries_the_previous_part_forward() -> None:
     text = series_angle(series, series.parts[2])
     assert "Earlier parts:" in text
     assert "- Part 1: Title 1. Summary 1." in text
-    assert "- Part 2: Title 2. Summary 2." in text
+    assert "- Part 2: Title 2. Summary 2." not in text  # listed once, as the previous part
     assert "Previous part (Part 2):" in text
     assert "- Summary: Summary 2." in text
     assert 'teaser promised: "Next in this series: promise 2."' in text
@@ -174,7 +174,7 @@ def test_series_angle_asks_for_a_marker_when_the_previous_part_has_no_url() -> N
 def test_series_angle_without_a_recorded_summary_or_teaser() -> None:
     series = _series("drafted", "planned")
     text = series_angle(series, series.parts[1])
-    assert "- Part 1: Title 1. (no summary recorded)" in text
+    assert "- Summary: (no summary recorded)" in text and "Earlier parts" not in text
     assert "teaser promised" not in text and "Deliver what" not in text
 
 

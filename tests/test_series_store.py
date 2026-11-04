@@ -511,3 +511,21 @@ def test_publication_refuses_a_part_changed_since_it_was_checked(tmp_path: Path)
     save_series(path, _series("approved"), "evals")  # Part 1 back to planned meanwhile
     with pytest.raises(ValueError, match="Part 1 is planned"):
         save_publication(publication)
+
+
+def test_mark_drafted_keeps_a_recorded_summary_and_teaser_when_none_is_given(
+    tmp_path: Path,
+) -> None:
+    path = _save(tmp_path, "evals", status="approved")
+    text = path.read_text().replace("  summary: ''\n", "  summary: Kept claim.\n", 1)
+    path.write_text(text.replace("  teaser: ''\n", "  teaser: 'Next in this series: x.'\n", 1))
+    assert mark_drafted(path, "evals", 1, "drafts/a.md") is True
+    part = load_series(path).parts[0]
+    assert (part.summary, part.teaser) == ("Kept claim.", "Next in this series: x.")
+
+
+def test_publication_url_must_have_a_host_on_load_too(tmp_path: Path) -> None:
+    path = _approved_file(tmp_path)
+    path.write_text(path.read_text().replace("  url: null\n", "  url: http:///p\n", 1))
+    with pytest.raises(ValueError, match="'url' must be an http"):
+        load_series(path)

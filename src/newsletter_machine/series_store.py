@@ -9,18 +9,17 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import yaml
 
 from newsletter_machine.drafting import write_atomic
 from newsletter_machine.ingest import YAML_LINE_WIDTH
 from newsletter_machine.series import (
-    URL_PATTERN,
     PartStatus,
     Series,
     SeriesPart,
     is_slug,
+    is_web_url,
     parse_series,
     series_to_mapping,
 )
@@ -233,8 +232,8 @@ def _drafted_series(path: Path, series: Series, edit: _PartEdit) -> Series:
         part,
         status="drafted",
         draft=fields["draft"],
-        summary=fields["summary"],
-        teaser=fields["teaser"],
+        summary=fields.get("summary", part.summary),
+        teaser=fields.get("teaser", part.teaser),
     )
     return _with_part(series, drafted)
 
@@ -244,9 +243,11 @@ def mark_drafted(
 ) -> bool:
     """Mark part ``number`` drafted with its draft path, one-line summary and closing teaser,
     re-reading the file first (Varun may have edited it during the run). Only those lines
-    change, so comments survive; returns False when the file had to be rewritten in full."""
+    change, so comments survive; returns False when the file had to be rewritten in full.
+    A blank summary or teaser keeps the one already recorded (e.g. from an earlier draft)."""
     text = _read(path)
-    fields = {"draft": draft, "summary": summary.strip(), "teaser": teaser.strip()}
+    carried = {"summary": summary.strip(), "teaser": teaser.strip()}
+    fields = {"draft": draft, **{name: value for name, value in carried.items() if value}}
     edit = _PartEdit(number, ("planned",), "drafted", fields)
     expected = _drafted_series(path, _parse_text(path, text), edit)
     kept = _write_part_edit(path, slug, text, expected, edit)
@@ -271,7 +272,7 @@ class Publication:
 def check_url(url: str) -> str:
     """The stripped URL when it is an absolute http(s) address with a host."""
     url = url.strip()
-    if not URL_PATTERN.fullmatch(url) or not urlsplit(url).hostname:
+    if not is_web_url(url):
         raise ValueError(f"the URL must be an http(s) address like https://... (got {url!r}).")
     return url
 

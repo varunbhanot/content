@@ -9,6 +9,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, get_args
+from urllib.parse import urlsplit
 
 from newsletter_machine.validation import is_int, non_empty_text, one_of
 
@@ -60,6 +61,11 @@ class Series:
     parts: tuple[SeriesPart, ...]
 
 
+def is_web_url(value: str) -> bool:
+    """An absolute http(s) address with a host, and no spaces."""
+    return bool(URL_PATTERN.fullmatch(value)) and bool(urlsplit(value).hostname)
+
+
 def is_slug(value: str) -> bool:
     """Kebab-case: lowercase letters and digits joined by single hyphens."""
     return bool(SLUG_PATTERN.fullmatch(value))
@@ -87,7 +93,7 @@ def _optional_url(raw: Mapping[str, Any], where: str) -> str | None:
     value = raw.get("url")
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
-    if not isinstance(value, str) or not URL_PATTERN.fullmatch(value.strip()):
+    if not isinstance(value, str) or not is_web_url(value.strip()):
         raise ValueError(f"{where}: 'url' must be an http(s) address or empty (got {value!r})")
     return value.strip()
 

@@ -78,3 +78,22 @@ def test_edit_part_is_none_when_the_status_is_not_one_expected() -> None:
 
 def test_edit_part_is_none_for_a_missing_part() -> None:
     assert edit_part(TEXT, 7, statuses=("planned",), status="drafted", fields={}) is None
+
+
+def test_edit_part_keeps_trailing_comments_with_apostrophes() -> None:
+    text = TEXT.replace("status: planned", "status: planned  # Varun's next pick").replace(
+        "  draft:\n", "  draft: null  # don't forget\n"
+    )
+    edited = edit_part(text, 2, statuses=("planned",), status="drafted", fields={"draft": "d.md"})
+    assert edited is not None
+    assert "# Varun's next pick" in edited and "# don't forget" in edited
+    assert _part(edited, 1)["draft"] == "d.md"
+
+
+def test_edit_part_keeps_a_double_quoted_value_and_its_comment() -> None:
+    text = TEXT.replace("url: null", 'url: "https://a.b/#x"  # it\'s live')
+    edited = edit_part(
+        text, 1, statuses=("drafted",), status="published", fields={"url": "https://c.d"}
+    )
+    assert edited is not None
+    assert _part(edited, 0)["url"] == "https://c.d" and "# it's live" in edited

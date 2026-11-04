@@ -198,9 +198,17 @@ def _summary(job: SeriesJob, text: str) -> str:
 
 def _teaser(job: SeriesJob, text: str) -> str:
     teaser = extract_teaser(text)
+    final = following_part(job.target.series, job.target.part) is None
+    if teaser and final:
+        print(
+            "The final part's draft ends with a 'Next in this series' line; remove it (not "
+            "recorded).",
+            file=sys.stderr,
+        )
+        return ""
     if teaser:
         print(f"Teaser: {teaser}")
-    elif following_part(job.target.series, job.target.part) is not None:
+    elif not final:
         print(
             "No 'Next in this series' line found in the draft; add one, and the teaser to "
             f"{job.target.path}, by hand.",

@@ -464,3 +464,17 @@ def test_series_issue_marks_the_part_drafted_when_the_draft_cannot_be_reread(
     assert "for its summary: locked" in capsys.readouterr().err
     part = load_series(path).parts[1]
     assert (part.status, part.summary) == ("drafted", "")
+
+
+def test_series_issue_does_not_record_a_teaser_on_the_final_part(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    last = replace(
+        SERIES, parts=(SERIES.parts[0], replace(SERIES.parts[1], status="drafted"), SERIES.parts[2])
+    )
+    path = _series_file(tmp_path, last)
+    _use_models(monkeypatch, writer=TEASER_DRAFT)
+    assert _series_issue(tmp_path) == 0
+    assert "final part" in capsys.readouterr().err
+    part = load_series(path).parts[2]
+    assert (part.status, part.teaser) == ("drafted", "")

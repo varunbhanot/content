@@ -49,7 +49,10 @@ def following_part(series: Series, part: SeriesPart) -> SeriesPart | None:
 
 
 def _earlier_lines(series: Series, part: SeriesPart) -> list[str]:
-    earlier = [p for p in series.parts if p.number < part.number]
+    """Parts before the previous one (which gets its own block)."""
+    earlier = [p for p in series.parts if p.number < part.number - 1]
+    if not earlier:
+        return []
     return [
         "Earlier parts:",
         *(f"- Part {p.number}: {p.title}. {p.summary or NO_SUMMARY}" for p in earlier),

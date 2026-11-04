@@ -46,6 +46,6 @@ items:
   - id: series-final-no-teaser
     section: Closings
     rule: This is the final part of the series; do not end with a "Next in this series" line.
-    check: Any "Next in this series" line is a hit.
+    check: Any emphasised line opening with "Next in this series" is a hit.
     severity: must
-    patterns: ['next in this series']
+    patterns: ['(?m)^[ \t>]*[*_]+[ \t]*next in this series']

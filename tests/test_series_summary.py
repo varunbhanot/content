@@ -31,6 +31,19 @@ def test_extract_teaser_finds_the_italic_next_line() -> None:
     assert extract_teaser(DRAFT) == "Next in this series: LLM-as-judge, and when to trust it."
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        "*Next in this series:* Part 3, judges.",
+        "**Next in this series:** Part 3, judges.",
+        "> *Next in this series: Part 3, judges.*",
+        "_Next in this series: Part 3, judges._",
+    ],
+)
+def test_extract_teaser_accepts_common_emphasis_forms(line: str) -> None:
+    assert extract_teaser(f"# T\n\nBody.\n\n{line}\n") == "Next in this series: Part 3, judges."
+
+
 def test_extract_teaser_accepts_underscores_and_picks_the_last() -> None:
     draft = "_Next in this series: one._\n\ntext\n\n_Next in this series: two._\n"
     assert extract_teaser(draft) == "Next in this series: two."
@@ -40,7 +53,6 @@ def test_extract_teaser_accepts_underscores_and_picks_the_last() -> None:
     "draft",
     [
         "# T\n\nNo teaser here.\n",
-        "# T\n\n**Next in this series: bold is not italic.**\n",
         "# T\n\nNext in this series: plain text.\n",
         "# T\n\n*Next up: something else.*\n",
     ],

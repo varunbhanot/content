@@ -24,16 +24,20 @@ logger = logging.getLogger(__name__)
 SUMMARY_NAME = "summary"
 SUMMARY_DRAFT_CHARS = 12_000  # a ~1,000-word part fits; the cap bounds a runaway draft
 MAX_SUMMARY_CHARS = 300  # one sentence; the series file and the next angle stay short
+# an emphasised line (italic or bold, whole or in part, maybe quoted) opening with the phrase
 TEASER_LINE = re.compile(
-    r"^[ \t]*(?P<mark>[*_])(?![*_])(?P<text>Next in this series\b[^\n]*?)(?<![*_])(?P=mark)[ \t]*$",
-    re.IGNORECASE | re.MULTILINE,
+    r"^[ \t]*(?:>[ \t]*)?[*_]+[ \t]*Next in this series\b.*$", re.IGNORECASE | re.MULTILINE
 )
+EMPHASIS = re.compile(r"\*+|^_+|_+$")
 
 
 def extract_teaser(draft: str) -> str:
-    """The text of the last italic "Next in this series ..." line, or "" when there is none."""
+    """The last emphasised "Next in this series ..." line without its Markdown, or ""."""
     matches = list(TEASER_LINE.finditer(draft))
-    return matches[-1].group("text").strip() if matches else ""
+    if not matches:
+        return ""
+    line = matches[-1].group(0).strip().removeprefix(">").strip()
+    return " ".join(EMPHASIS.sub("", line).split())
 
 
 def summary_system_prompt(prompt: Prompt | None = None) -> str:

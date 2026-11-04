@@ -92,6 +92,8 @@ def test_the_final_part_gets_the_code_checked_no_teaser_item() -> None:
     assert final.is_mechanical
     assert run_mechanical(final, "# T\n\n*Next in this series: more.*\n").status == "fail"
     assert run_mechanical(final, "# T\n\nThe end.\n").status == "pass"
+    prose = "# T\n\nEach part ended with a Next in this series line.\n"
+    assert run_mechanical(final, prose).status == "pass"
 
 
 def _checks_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str) -> None:

@@ -9,8 +9,10 @@ import json
 import re
 from collections.abc import Mapping
 
-# a trailing comment holds no quotes, so a quoted value with " # " in it stays whole
-COMMENT = r"(?P<comment>[ \t]+#[^'\"\n]*)?[ \t]*$"
+COMMENT = r"(?P<comment>[ \t]+#.*?)?[ \t]*$"
+# a quoted scalar is matched whole, so a " # " inside it is not a comment; a plain value
+# ends at the first " #", as in YAML
+VALUE = r"""[ \t]*(?:'(?:[^'\n]|'')*'|"(?:[^"\\\n]|\\.)*"|[^\s#'"][^\n]*?)?"""
 
 
 def part_block(text: str, number: int) -> tuple[int, int, str] | None:
@@ -32,7 +34,7 @@ def _line(key: str, field: str, value: str, comment: str | None) -> str:
 
 def _set_field(body: str, key: str, field: str, value: str) -> tuple[str, bool]:
     """Replace ``field``'s one-line value; False when the key is missing."""
-    pattern = re.compile(rf"^{key}{re.escape(field)}:(?P<value>[^\n]*?){COMMENT}", re.MULTILINE)
+    pattern = re.compile(rf"^{key}{re.escape(field)}:{VALUE}{COMMENT}", re.MULTILINE)
     body, count = pattern.subn(lambda m: _line(key, field, value, m.group("comment")), body, 1)
     return body, bool(count)
 
