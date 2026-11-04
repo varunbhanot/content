@@ -169,6 +169,26 @@ uv run newsletter-machine series show evals
 `--drafts-dir` and `--series-dir` change the folders. `NM_PLANNER_MODEL` picks the model.
 Planning instructions: [`src/newsletter_machine/prompts/planner.md`](src/newsletter_machine/prompts/planner.md).
 
+### Draft the next part
+
+Once a series is approved, `issue --series` drafts its next `planned` part (lowest number first).
+Each usable source gets one cheap relevance check against the series topic and outline:
+off-topic sources are not used, stay in `drafts/<date>.sources/`, and are listed in
+`drafts/<date>.parked.md`. The outline and this part's brief, arc and access reach the editor,
+researcher and writer the way `--angle` does (`--series` and `--angle` cannot be combined).
+
+```bash
+uv run newsletter-machine issue --series evals --since 7d --out drafts/2026-11-04.md
+```
+
+After a fully successful run the part is marked `drafted` with its draft path (relative to
+the repo) in
+`series/evals.yaml` (only those two lines change, so your comments stay). A failed run leaves
+the file alone. With no on-topic source the command prints the parked list and drafts nothing
+(exit 0). `--sources drafts/<date>.sources` reruns on saved sources; `NM_RELEVANCE_MODEL` picks
+the relevance model. Filter instructions:
+[`src/newsletter_machine/prompts/relevance.md`](src/newsletter_machine/prompts/relevance.md).
+
 ## Weekly schedule: `weekly` and Managed Deep Agents
 
 `weekly` is `issue` made hands-off: it runs `issue` for today's date (in `NM_TIMEZONE`) on the
@@ -335,6 +355,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy src
 | `NM_CRITIC_MODEL` | writer model | Voice critic model |
 | `NM_EDITOR_MODEL` | writer model | Lead editor model for `issue` |
 | `NM_PLANNER_MODEL` | writer model | Series planner model for `series plan` |
+| `NM_RELEVANCE_MODEL` | fast model | Per-source relevance filter for `issue --series` |
 | `NM_MAX_REVISIONS` | `1` | Critique → revise loops per issue (0 to 3) |
 | `NM_VOICE_DIR` | `voice` | Voice corpus root (relative to cwd) |
 | `LOG_LEVEL` | `INFO` | Logging level |

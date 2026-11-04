@@ -32,12 +32,21 @@ from newsletter_machine.cli_common import (
     sources_line,
     write_reported,
 )
+from newsletter_machine.cli_issue_series import (
+    SeriesJob,
+    add_series_options,
+    filter_sources,
+    finish_series,
+    series_job,
+    series_target,
+)
 from newsletter_machine.config import (
     ConfigError,
     IngestSettings,
     Settings,
     load_editor_settings,
     load_ingest_settings,
+    load_relevance_model,
     load_settings,
 )
 from newsletter_machine.drafting import (
@@ -69,6 +78,7 @@ from newsletter_machine.issue_output import (
     error_lines,
     render_notes,
 )
+from newsletter_machine.relevance import source_lines
 from newsletter_machine.researcher import build_researcher, researcher_system_prompt
 from newsletter_machine.sources import SourceDoc, parse_since
 from newsletter_machine.workspace import (
@@ -84,6 +94,7 @@ from newsletter_machine.writer import usable_sources
 logger = logging.getLogger(__name__)
 
 NOTES_SUFFIX = ".notes.md"
+PARKED_SUFFIX = ".parked.md"
 
 
 def add_issue_parser(sub: Any) -> None:
@@ -91,7 +102,9 @@ def add_issue_parser(sub: Any) -> None:
         "issue", help="One command: ingest links, plan, research, draft, critique, revise"
     )
     issue.add_argument("--out", required=True, type=Path, help="Draft file (.md); extras beside it")
-    issue.add_argument("--angle", help="Your topic or argument in a line (optional)")
+    steer = issue.add_mutually_exclusive_group()
+    steer.add_argument("--angle", help="Your topic or argument in a line (optional)")
+    add_series_options(issue, steer)
     inputs = issue.add_mutually_exclusive_group()
     inputs.add_argument("--sources", type=Path, help="Reuse a folder written by 'ingest'")
     inputs.add_argument("--links-file", type=Path, help="Read 'URL [note]' lines, not Gmail")
@@ -105,6 +118,7 @@ class IssuePaths:
     critique: Path
     notes: Path
     sources: Path  # where ingest writes this week's source files
+    parked: Path  # series mode: the sources the relevance filter set aside
 
 
 def issue_paths(out: Path) -> IssuePaths:
@@ -115,6 +129,7 @@ def issue_paths(out: Path) -> IssuePaths:
         critique=base.critique,
         notes=out.with_name(f"{out.stem}{NOTES_SUFFIX}"),
         sources=out.with_name(f"{out.stem}{SOURCES_SUFFIX}"),
+        parked=out.with_name(f"{out.stem}{PARKED_SUFFIX}"),
     )
 
 
@@ -150,6 +165,7 @@ class _Job:
     agents: _Agents
     ingest: IngestSettings | None  # None when reusing --sources
     since: datetime
+    series: SeriesJob | None = None  # set by --series
 
 
 def _build_agents(settings: Settings) -> _Agents:
@@ -183,9 +199,16 @@ def _prepare(args: argparse.Namespace) -> _Job:
     paths = issue_paths(args.out)
     ingesting = args.sources is None
     _check_paths(paths, overwrite=args.overwrite, ingesting=ingesting)
+    target = series_target(args, paths.parked)  # before any model is built
     ingest = load_ingest_settings() if ingesting else None
     since = parse_since(args.since or DEFAULT_SINCE, datetime.now(UTC))
-    return _Job(paths, _build_agents(settings), ingest, since)
+    agents = _build_agents(settings)
+    series = None
+    if target is not None:
+        model = make_chat_model(load_relevance_model(settings), settings.anthropic_api_key)
+        series = series_job(target, model)
+        print(f"Drafting {series.label}")
+    return _Job(paths, agents, ingest, since, series)
 
 
 class IngestRunError(Exception):
@@ -211,22 +234,34 @@ def _gather(job: _Job, args: argparse.Namespace) -> tuple[SourceDoc, ...]:
 
 
 @dataclass(frozen=True)
+class _Steer:
+    """What steers the run: Varun's ``--angle``, or a series part (angle text plus notes)."""
+
+    angle: str | None
+    series: str = ""  # the series label; blank for a plain issue
+    parked: tuple[str, ...] = ()
+    unchecked: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class _Pipeline:
     editor: Any
     inputs: EditorInputs
     critic: CompiledSubAgent
+    steer: _Steer
 
 
-def _pipeline(job: _Job, docs: tuple[SourceDoc, ...], angle: str | None) -> _Pipeline:
+def _pipeline(job: _Job, docs: tuple[SourceDoc, ...], steer: _Steer) -> _Pipeline:
     agents = job.agents
     inputs = EditorInputs(
         docs=docs,
-        angle=angle,
+        angle=steer.angle,
         checklist=agents.checklist,
         max_revisions=agents.max_revisions,
         draft_name=job.paths.draft.name,
         writer_version=agents.phase3.writer_version,
         critic_version=agents.phase3.critic_version,
+        series_label=steer.series,
     )
     subagents = build_editor_subagents(
         inputs,
@@ -235,7 +270,7 @@ def _pipeline(job: _Job, docs: tuple[SourceDoc, ...], angle: str | None) -> _Pip
         critic=agents.phase3.critic,
     )
     editor = build_editor(agents.editor_model, subagents, agents.editor_prompt)
-    return _Pipeline(editor, inputs, agents.phase3.critic)
+    return _Pipeline(editor, inputs, agents.phase3.critic, steer)
 
 
 def _progress(files: Any, version: int, final: Mapping[str, Any] | None) -> str:
@@ -290,6 +325,9 @@ def _notes_text(
         summary=summary,
         dropped=dropped_links(run.files, version),
         final_summary=_final_summary(final),
+        series=pipe.steer.series,
+        parked=pipe.steer.parked,
+        unchecked=pipe.steer.unchecked,
     )
     return render_notes(notes)
 
@@ -352,10 +390,33 @@ def run_issue(args: argparse.Namespace) -> int:
     if not docs:
         print("No links found; nothing to draft.")
         return 0
-    pipe = _pipeline(job, docs, args.angle)
+    if job.series is None:
+        return _draft(job, docs, _Steer(args.angle))
+    return _draft_series(job, job.series, docs, args)
+
+
+def _draft_series(
+    job: _Job, series: SeriesJob, docs: tuple[SourceDoc, ...], args: argparse.Namespace
+) -> int:
+    """Filter to on-topic sources, draft the part, then mark it drafted (exit 0 only)."""
+    relevance = filter_sources(series, docs, args.sources or job.paths.sources)
+    if relevance is None:
+        return EXIT_ERROR
+    if not usable_sources(relevance.kept):
+        part = series.target.part.number
+        print(f"No on-topic sources for Part {part}; nothing to draft.")
+        return 0
+    lines = source_lines(relevance.parked), source_lines(relevance.unchecked)
+    steer = _Steer(series.angle, series.label, *lines)
+    code = _draft(job, relevance.kept, steer)
+    return finish_series(series, code, job.paths.draft)
+
+
+def _draft(job: _Job, docs: tuple[SourceDoc, ...], steer: _Steer) -> int:
+    pipe = _pipeline(job, docs, steer)
     print(sources_line(docs))
     try:
-        run = run_editor(pipe.editor, editor_task(docs, args.angle), seed_files(docs))
+        run = run_editor(pipe.editor, editor_task(docs, steer.angle), seed_files(docs))
     except Exception as exc:  # network/API failures surface as many types
         logger.debug("Editor run failed", exc_info=True)
         print(f"Editor failed: {exc}", file=sys.stderr)
