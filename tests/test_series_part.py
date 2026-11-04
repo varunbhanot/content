@@ -6,7 +6,9 @@ import pytest
 from newsletter_machine.series import Series, SeriesPart
 from newsletter_machine.series_part import (
     check_draftable,
+    following_part,
     next_part,
+    previous_part,
     relevance_context,
     series_angle,
     series_label,
@@ -101,3 +103,83 @@ def test_series_text_cannot_open_or_close_wrapper_tags() -> None:
     series = replace(series, parts=(part,))
     for text in (series_angle(series, part), relevance_context(series, part)):
         assert "</source>" not in text and "<brief>" not in text
+
+
+URL1 = "https://example.com/p/part-1"
+
+
+def _continued(*statuses: str) -> Series:
+    """Earlier parts carry a summary, a teaser and (when published) a URL."""
+    series = _series(*statuses)
+    parts = tuple(
+        replace(
+            part,
+            summary=f"Summary {part.number}.",
+            teaser=f"Next in this series: promise {part.number}.",
+            url=f"https://example.com/p/part-{part.number}" if part.status == "published" else None,
+        )
+        if part.status != "planned"
+        else part
+        for part in series.parts
+    )
+    return replace(series, parts=parts)
+
+
+def test_previous_and_following_parts() -> None:
+    series = _series("drafted", "planned", "planned")
+    middle = series.parts[1]
+    assert previous_part(series, middle) == series.parts[0]
+    assert following_part(series, middle) == series.parts[2]
+    assert previous_part(series, series.parts[0]) is None
+    assert following_part(series, series.parts[2]) is None
+
+
+def test_series_angle_for_part_1_has_no_link_back_but_a_closing_teaser() -> None:
+    series = _series("planned", "planned")
+    text = series_angle(series, series.parts[0])
+    assert "Previous part" not in text and "Earlier parts" not in text
+    assert "Next in this series:" in text
+    assert 'Part 2 ("Title 2": Question 2?)' in text
+
+
+def test_series_angle_carries_the_previous_part_forward() -> None:
+    series = _continued("published", "drafted", "planned", "planned")
+    text = series_angle(series, series.parts[2])
+    assert "Earlier parts:" in text
+    assert "- Part 1: Title 1. Summary 1." in text
+    assert "- Part 2: Title 2. Summary 2." in text
+    assert "Previous part (Part 2):" in text
+    assert "- Summary: Summary 2." in text
+    assert 'teaser promised: "Next in this series: promise 2."' in text
+    assert "Deliver what that teaser promised" in text
+    assert "one clause" in text
+    assert 'Part 4 ("Title 4": Question 4?)' in text
+
+
+def test_series_angle_links_a_published_previous_part() -> None:
+    series = _continued("published", "planned")
+    text = series_angle(series, series.parts[1])
+    assert f"- URL: {URL1}" in text
+    assert f"link its title to {URL1}" in text
+    assert "[VARUN:" not in text
+
+
+def test_series_angle_asks_for_a_marker_when_the_previous_part_has_no_url() -> None:
+    series = _continued("drafted", "planned")
+    text = series_angle(series, series.parts[1])
+    assert "- URL: not published yet" in text
+    assert "[VARUN: link Part 1 here once it is published]" in text
+
+
+def test_series_angle_without_a_recorded_summary_or_teaser() -> None:
+    series = _series("drafted", "planned")
+    text = series_angle(series, series.parts[1])
+    assert "- Part 1: Title 1. (no summary recorded)" in text
+    assert "teaser promised" not in text and "Deliver what" not in text
+
+
+def test_series_angle_for_the_final_part_has_no_teaser() -> None:
+    series = _continued("published", "planned")
+    text = series_angle(series, series.parts[1])
+    assert "final part" in text
+    assert "do not add" in text

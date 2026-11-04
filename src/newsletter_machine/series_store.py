@@ -3,24 +3,28 @@
 Only one series may be ``approved`` (active) at a time, so the weekly run is unambiguous.
 """
 
-import json
 import logging
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 
 from newsletter_machine.drafting import write_atomic
 from newsletter_machine.ingest import YAML_LINE_WIDTH
 from newsletter_machine.series import (
+    URL_PATTERN,
+    PartStatus,
     Series,
     SeriesPart,
     is_slug,
     parse_series,
     series_to_mapping,
 )
+from newsletter_machine.series_edit import edit_part
 
 logger = logging.getLogger(__name__)
 
@@ -172,38 +176,6 @@ def save_approval(approval: Approval) -> None:
     logger.info("Approved %s", approval.path)
 
 
-def _part_block(text: str, number: int) -> tuple[int, int, str] | None:
-    """``(start, end, key indent)`` of part ``number``'s block in block-style YAML."""
-    start = re.search(rf"^([ \t]*)- number:[ \t]*{number}[ \t]*(?:#.*)?$", text, re.MULTILINE)
-    if start is None:
-        return None
-    indent = start.group(1)
-    # the next part, or a top-level key; a column-0 comment stays inside the block
-    after = re.compile(rf"^(?:{indent}-[ \t]|[^\s#])", re.MULTILINE)
-    end = after.search(text, start.end())
-    return start.end(), end.start() if end else len(text), f"{indent}  "
-
-
-def _drafted_text(text: str, number: int, draft: str) -> str | None:
-    """Edit only part ``number``'s ``status`` and ``draft`` lines (adding ``draft`` after
-    ``status`` when the key is missing); None when the status line is written another way."""
-    block = _part_block(text, number)
-    if block is None:
-        return None
-    start, end, key = block
-    body = text[start:end]
-    status = re.compile(rf"^{key}status:[ \t]*(['\"]?)planned\1([ \t]+#.*)?[ \t]*$", re.MULTILINE)
-    path = re.compile(
-        rf"^{key}draft:[ \t]*(?:null|Null|NULL|~|''|\"\")?([ \t]+#.*)?[ \t]*$", re.MULTILINE
-    )
-    has_draft_key = re.search(rf"^{key}draft:", body, re.MULTILINE) is not None
-    line = f"{key}draft: {json.dumps(draft, ensure_ascii=False)}"  # JSON strings are valid YAML
-    added = "" if has_draft_key else f"\n{line}"
-    body, flipped = status.subn(lambda m: f"{key}status: drafted{m.group(2) or ''}{added}", body, 1)
-    body, pointed = path.subn(lambda m: f"{line}{m.group(1) or ''}", body, 1)
-    return text[:start] + body + text[end:] if flipped and (pointed or added) else None
-
-
 def _parses_to(path: Path, text: str | None, expected: Series) -> bool:
     if text is None:
         return False
@@ -213,32 +185,126 @@ def _parses_to(path: Path, text: str | None, expected: Series) -> bool:
         return False
 
 
-def _drafted_series(path: Path, series: Series, number: int, draft: str) -> Series:
+def _find_part(path: Path, series: Series, number: int) -> SeriesPart:
     part = next((p for p in series.parts if p.number == number), None)
     if part is None:
         raise ValueError(f"{path} has no Part {number}.")
-    if part.status != "planned":
-        raise ValueError(f"{path}: Part {number} is {part.status}, not planned.")
-    if series.status != "approved":
-        raise ValueError(f"{path} is now {series.status}, no longer approved.")
-    drafted: SeriesPart = replace(part, status="drafted", draft=draft)
-    parts = tuple(drafted if p.number == number else p for p in series.parts)
-    return replace(series, parts=parts)
+    return part
 
 
-def mark_drafted(path: Path, slug: str, number: int, draft: str) -> bool:
-    """Mark part ``number`` drafted with its draft path, re-reading the file first (Varun may
-    have edited it during the run). Only two lines change, so comments survive; returns
-    False when the file had to be rewritten in full instead."""
-    text = _read(path)
-    expected = _drafted_series(path, _parse_text(path, text), number, draft)
-    edited = _drafted_text(text, number, draft)
+def _with_part(series: Series, part: SeriesPart) -> Series:
+    return replace(
+        series, parts=tuple(part if p.number == part.number else p for p in series.parts)
+    )
+
+
+@dataclass(frozen=True)
+class _PartEdit:
+    """One part's new status (allowed only from ``statuses``) and field values."""
+
+    number: int
+    statuses: tuple[PartStatus, ...]
+    status: PartStatus
+    fields: Mapping[str, str]
+
+
+def _write_part_edit(path: Path, slug: str, text: str, expected: Series, edit: _PartEdit) -> bool:
+    """Write ``expected`` by editing only the part's lines, so comments survive; a full
+    (checked) rewrite when the lines are written some other way. True when comments were kept."""
+    edited = edit_part(
+        text, edit.number, statuses=edit.statuses, status=edit.status, fields=edit.fields
+    )
     kept = _parses_to(path, edited, expected)
     if kept and edited is not None:
         write_atomic(path, edited)
     else:
         save_series(path, expected, slug)  # checks the rewrite loads before writing
+    return kept
+
+
+def _drafted_series(path: Path, series: Series, edit: _PartEdit) -> Series:
+    part = _find_part(path, series, edit.number)
+    if part.status != "planned":
+        raise ValueError(f"{path}: Part {edit.number} is {part.status}, not planned.")
+    if series.status != "approved":
+        raise ValueError(f"{path} is now {series.status}, no longer approved.")
+    fields = edit.fields
+    drafted = replace(
+        part,
+        status="drafted",
+        draft=fields["draft"],
+        summary=fields["summary"],
+        teaser=fields["teaser"],
+    )
+    return _with_part(series, drafted)
+
+
+def mark_drafted(
+    path: Path, slug: str, number: int, draft: str, *, summary: str = "", teaser: str = ""
+) -> bool:
+    """Mark part ``number`` drafted with its draft path, one-line summary and closing teaser,
+    re-reading the file first (Varun may have edited it during the run). Only those lines
+    change, so comments survive; returns False when the file had to be rewritten in full."""
+    text = _read(path)
+    fields = {"draft": draft, "summary": summary.strip(), "teaser": teaser.strip()}
+    edit = _PartEdit(number, ("planned",), "drafted", fields)
+    expected = _drafted_series(path, _parse_text(path, text), edit)
+    kept = _write_part_edit(path, slug, text, expected, edit)
     logger.info("Marked part %d of %s drafted (%s)", number, path, draft)
+    return kept
+
+
+PUBLISHABLE: tuple[PartStatus, ...] = ("drafted", "published")
+
+
+@dataclass(frozen=True)
+class Publication:
+    """A checked ``series published``: ``changed`` is False when the URL is already recorded."""
+
+    path: Path
+    slug: str
+    number: int
+    url: str
+    changed: bool
+
+
+def check_url(url: str) -> str:
+    """The stripped URL when it is an absolute http(s) address with a host."""
+    url = url.strip()
+    if not URL_PATTERN.fullmatch(url) or not urlsplit(url).hostname:
+        raise ValueError(f"the URL must be an http(s) address like https://... (got {url!r}).")
+    return url
+
+
+def _published_series(path: Path, series: Series, number: int, url: str) -> Series:
+    part = _find_part(path, series, number)
+    if part.status not in PUBLISHABLE:
+        raise ValueError(
+            f"{path}: Part {number} is {part.status}; only a drafted (or published) part can "
+            "be recorded as published."
+        )
+    return _with_part(series, replace(part, status="published", url=url))
+
+
+def plan_publication(series_dir: Path, slug: str, number: int, url: str) -> Publication:
+    """Validate ``series published`` without writing."""
+    url = check_url(url)
+    path = series_path(series_dir, slug)
+    series = load_series(path)
+    expected = _published_series(path, series, number, url)
+    return Publication(path, slug, number, url, changed=expected != series)
+
+
+def save_publication(publication: Publication) -> bool:
+    """Record the URL (re-checking the file first); True when comments were kept."""
+    if not publication.changed:
+        return True
+    p = publication
+    text = _read(p.path)
+    expected = _published_series(p.path, _parse_text(p.path, text), p.number, p.url)
+    edit = _PartEdit(p.number, PUBLISHABLE, "published", {"url": p.url})
+    kept = _write_part_edit(p.path, p.slug, text, expected, edit)
+    logger.info("Marked part %d of %s published (%s)", p.number, p.path, p.url)
     return kept
 
 

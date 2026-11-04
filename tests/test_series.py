@@ -179,12 +179,16 @@ def test_format_outline_shows_draft_and_url_when_set() -> None:
         thin=True,
         draft="drafts/x.md",
         url="https://x.example/p",
+        summary="Demos lie.",
+        teaser="Next in this series: golden sets.",
     )
     text = format_outline(Series(topic="evals", status="approved", parts=(part,)), "evals")
 
     assert "Part 1 [free, published] T  THIN: needs more reading" in text
     assert "  Draft: drafts/x.md" in text
     assert "  URL: https://x.example/p" in text
+    assert "  Summary: Demos lie." in text
+    assert "  Teaser: Next in this series: golden sets." in text
 
 
 def test_null_optional_fields_read_as_empty() -> None:

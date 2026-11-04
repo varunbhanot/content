@@ -181,13 +181,33 @@ researcher and writer the way `--angle` does (`--series` and `--angle` cannot be
 uv run newsletter-machine issue --series evals --since 7d --out drafts/2026-11-04.md
 ```
 
-After a fully successful run the part is marked `drafted` with its draft path (relative to
-the repo) in
-`series/evals.yaml` (only those two lines change, so your comments stay). A failed run leaves
-the file alone. With no on-topic source the command prints the parked list and drafts nothing
+After a fully successful run the part is marked `drafted` in `series/evals.yaml` with its
+draft path (relative to the repo), a one-line `summary` of its core claim (one cheap
+`NM_SUMMARY_MODEL` call) and its closing `teaser` (the draft's italic "*Next in this
+series: ...*" line). Only those lines change, so your comments stay; edit `summary` or
+`teaser` by hand if the published text says something else. A failed run leaves the file
+alone. With no on-topic source the command prints the parked list and drafts nothing
 (exit 0). `--sources drafts/<date>.sources` reruns on saved sources; `NM_RELEVANCE_MODEL` picks
 the relevance model. Filter instructions:
 [`src/newsletter_machine/prompts/relevance.md`](src/newsletter_machine/prompts/relevance.md).
+
+### Record a published part, and continuity
+
+After you publish a part on Substack, record its live URL (the part must be `drafted`; run it
+again to correct a URL):
+
+```bash
+uv run newsletter-machine series published evals 1 https://varunbhanot.substack.com/p/...
+```
+
+From Part 2 on, `issue --series` carries the series forward: the angle gives the previous
+part's title, URL, summary and teaser, plus one-line summaries of all earlier parts. The writer
+opens with a one-clause link back (a `[VARUN: ...]` marker when the previous part has no URL
+yet), delivers what the teaser promised, and ends with an italic "*Next in this series: ...*"
+line for the next planned part (none on the last part). The critic gets series-only checks
+for this ([`src/newsletter_machine/series_checks.yaml`](src/newsletter_machine/series_checks.yaml)),
+on top of the voice checklist. Summary instructions:
+[`src/newsletter_machine/prompts/summary.md`](src/newsletter_machine/prompts/summary.md).
 
 ## Weekly schedule: `weekly` and Managed Deep Agents
 
@@ -356,6 +376,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy src
 | `NM_EDITOR_MODEL` | writer model | Lead editor model for `issue` |
 | `NM_PLANNER_MODEL` | writer model | Series planner model for `series plan` |
 | `NM_RELEVANCE_MODEL` | fast model | Per-source relevance filter for `issue --series` |
+| `NM_SUMMARY_MODEL` | fast model | One-line summary of each drafted series part |
 | `NM_MAX_REVISIONS` | `1` | Critique → revise loops per issue (0 to 3) |
 | `NM_VOICE_DIR` | `voice` | Voice corpus root (relative to cwd) |
 | `LOG_LEVEL` | `INFO` | Logging level |

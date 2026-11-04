@@ -300,3 +300,92 @@ def test_approve_write_failure_exits_1(
 
     assert _cmd(tmp_path, "approve") == 1
     assert "Could not write the series: read-only" in capsys.readouterr().err
+
+
+URL = "https://varunbhanot.substack.com/p/evals-part-1"
+
+
+def _drafted_series(tmp_path: Path) -> Path:
+    (tmp_path / "series").mkdir()
+    path = tmp_path / "series" / "evals.yaml"
+    text = _valid_yaml("approved").replace("status: planned", "status: drafted", 1) + (
+        "- number: 2\n  title: T2\n  question: Q2?\n  brief: B2.\n  arc: [a, b]\n"
+        "  access: paid\n  status: planned\n  sources: []\n"
+    )
+    path.write_text("# Varun: my notes\n" + text, encoding="utf-8")
+    return path
+
+
+def _published(tmp_path: Path, number: str = "1", url: str = URL) -> int:
+    return main(
+        ["series", "published", "evals", number, url, "--series-dir", str(tmp_path / "series")]
+    )
+
+
+def test_published_records_the_url_and_needs_no_api_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    path = _drafted_series(tmp_path)
+
+    assert _published(tmp_path) == 0
+    assert f"Recorded Part 1 published at {URL} in {path}" in capsys.readouterr().out
+    assert "# Varun: my notes" in path.read_text()
+    part = load_series(path).parts[0]
+    assert (part.status, part.url) == ("published", URL)
+
+    assert _published(tmp_path) == 0
+    assert "already recorded" in capsys.readouterr().out
+
+
+def test_published_says_when_comments_could_not_be_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _drafted_series(tmp_path)
+    monkeypatch.setattr(cli_series, "save_publication", lambda publication: False)
+
+    assert _published(tmp_path) == 0
+    assert "rewritten in full" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("number", "url", "message"),
+    [
+        ("1", "ftp://example.com/p", "http(s) address"),
+        ("2", URL, "Part 2 is planned"),
+        ("9", URL, "no Part 9"),
+    ],
+)
+def test_published_usage_errors_exit_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], number: str, url: str, message: str
+) -> None:
+    path = _drafted_series(tmp_path)
+    before = path.read_text()
+
+    assert _published(tmp_path, number, url) == 2
+
+    assert message in capsys.readouterr().err
+    assert path.read_text() == before
+
+
+def test_published_rejects_a_non_number_part(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _drafted_series(tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        _published(tmp_path, "one")
+    assert exc.value.code == 2
+
+
+def test_published_write_failure_exits_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _drafted_series(tmp_path)
+
+    def _fail(*args: Any) -> None:
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr(series_store, "write_atomic", _fail)
+
+    assert _published(tmp_path) == 1
+    assert "Could not write the series: read-only" in capsys.readouterr().err

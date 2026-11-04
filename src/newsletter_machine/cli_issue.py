@@ -34,9 +34,12 @@ from newsletter_machine.cli_common import (
 )
 from newsletter_machine.cli_issue_series import (
     SeriesJob,
+    SeriesTarget,
     add_series_options,
+    continuity_note,
     filter_sources,
     finish_series,
+    series_grounding,
     series_job,
     series_target,
 )
@@ -48,6 +51,7 @@ from newsletter_machine.config import (
     load_ingest_settings,
     load_relevance_model,
     load_settings,
+    load_summary_model,
 )
 from newsletter_machine.drafting import (
     OutputPaths,
@@ -168,9 +172,11 @@ class _Job:
     series: SeriesJob | None = None  # set by --series
 
 
-def _build_agents(settings: Settings) -> _Agents:
+def _build_agents(settings: Settings, target: SeriesTarget | None = None) -> _Agents:
     editor = load_editor_settings(settings)
     grounding = load_grounding(settings.voice_dir)
+    if target is not None:  # series checks join the checklist the writer and critic see
+        grounding = series_grounding(grounding, target)
     key = settings.anthropic_api_key
     phase3 = build_subagents(
         grounding,
@@ -202,12 +208,16 @@ def _prepare(args: argparse.Namespace) -> _Job:
     target = series_target(args, paths.parked)  # before any model is built
     ingest = load_ingest_settings() if ingesting else None
     since = parse_since(args.since or DEFAULT_SINCE, datetime.now(UTC))
-    agents = _build_agents(settings)
+    agents = _build_agents(settings, target)
     series = None
     if target is not None:
-        model = make_chat_model(load_relevance_model(settings), settings.anthropic_api_key)
-        series = series_job(target, model)
+        key = settings.anthropic_api_key
+        relevance = make_chat_model(load_relevance_model(settings), key)
+        series = series_job(target, relevance, make_chat_model(load_summary_model(settings), key))
         print(f"Drafting {series.label}")
+        note = continuity_note(target)
+        if note:
+            print(note)
     return _Job(paths, agents, ingest, since, series)
 
 

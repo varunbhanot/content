@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from fakes import DRAFT, VOICE, FakeModel, critic_reply, fake, relevance_fake, task_call
-from newsletter_machine import cli_issue, cli_issue_series, config
+from newsletter_machine import cli_issue, cli_issue_series, config, drafting, editor_subagents
 from newsletter_machine.cli import main
 from newsletter_machine.ingest import write_sources
 from newsletter_machine.series import Series, SeriesPart
@@ -37,7 +37,7 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
     monkeypatch.setenv("NM_VOICE_DIR", str(VOICE))
-    for name in ("writer", "critic", "editor", "fast", "relevance"):
+    for name in ("writer", "critic", "editor", "fast", "relevance", "summary"):
         monkeypatch.setenv(f"NM_{name.upper()}_MODEL", f"fake:{name}")
     monkeypatch.setenv("NM_MAX_REVISIONS", "1")
 
@@ -79,12 +79,15 @@ def _use_models(
     *,
     editor: Sequence[Any] = FULL_RUN,
     off: tuple[str, ...] = ("pricing",),
+    writer: str = DRAFT,
+    summary: str = "Part 2 in a sentence.",
 ) -> list[str]:
     replies = {
         "fake:editor": editor,
-        "fake:writer": (DRAFT,),
+        "fake:writer": (writer,),
         "fake:critic": (critic_reply(),),
         "fake:fast": ("- notes",) * 3,
+        "fake:summary": (summary,),
     }
     built: list[str] = []
 
@@ -243,7 +246,7 @@ def test_series_issue_exits_1_but_keeps_the_draft_when_the_series_cannot_be_upda
     _series_file(tmp_path)
     _use_models(monkeypatch)
 
-    def _changed(*args: Any) -> bool:
+    def _changed(*args: Any, **kwargs: Any) -> bool:
         raise ValueError("Part 2 is drafted, not planned")
 
     monkeypatch.setattr(cli_issue_series, "mark_drafted", _changed)
@@ -258,7 +261,7 @@ def test_series_issue_says_when_comments_could_not_be_kept(
 ) -> None:
     _series_file(tmp_path)
     _use_models(monkeypatch)
-    monkeypatch.setattr(cli_issue_series, "mark_drafted", lambda *a: False)
+    monkeypatch.setattr(cli_issue_series, "mark_drafted", lambda *a, **k: False)
     assert _series_issue(tmp_path) == 0
     assert "rewritten in full" in capsys.readouterr().out
 
@@ -338,3 +341,126 @@ def test_series_issue_exits_1_without_drafting_when_no_source_could_be_checked(
     assert "relevance check failed for every source" in captured.err
     assert "NM_RELEVANCE_MODEL" in captured.err
     assert not (tmp_path / "issue.md").exists() and path.read_text() == before
+
+
+TEASER_DRAFT = DRAFT.replace(
+    "## Sources", "*Next in this series: judges, and when to trust them.*\n\n## Sources"
+)
+PUBLISHED = replace(
+    SERIES,
+    parts=(
+        replace(
+            SERIES.parts[0],
+            status="published",
+            url="https://example.com/p/why-evals",
+            summary="Demos pass because nobody measures them.",
+            teaser="Next in this series: how to build a golden set.",
+        ),
+        *SERIES.parts[1:],
+    ),
+)
+
+
+def _capture_writer_and_critic(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
+    """Record the writer tasks and the critic system prompt the run builds."""
+    seen: dict[str, list[str]] = {"writer": [], "critic_prompt": []}
+    original_task = editor_subagents.revision_task
+    original_prompt = drafting.critic_system_prompt
+
+    def _task(*args: Any) -> str:
+        text = original_task(*args)
+        seen["writer"].append(text)
+        return text
+
+    def _prompt(*args: Any, **kwargs: Any) -> str:
+        text = original_prompt(*args, **kwargs)
+        seen["critic_prompt"].append(text)
+        return text
+
+    monkeypatch.setattr(editor_subagents, "revision_task", _task)
+    monkeypatch.setattr(drafting, "critic_system_prompt", _prompt)
+    return seen
+
+
+def test_series_issue_carries_the_previous_part_forward_and_records_what_this_one_says(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _series_file(tmp_path, PUBLISHED)
+    _use_models(monkeypatch, writer=TEASER_DRAFT, summary="Golden sets turn vibes into data.")
+    seen = _capture_writer_and_critic(monkeypatch)
+    assert _series_issue(tmp_path) == 0
+    out = capsys.readouterr().out
+    writer_task = seen["writer"][0]
+    assert "Previous part (Part 1):" in writer_task
+    assert "- URL: https://example.com/p/why-evals" in writer_task
+    assert '"Next in this series: how to build a golden set."' in writer_task
+    assert 'Part 3 ("Judges": Question 3?)' in writer_task
+    critic_prompt = seen["critic_prompt"][0]
+    for item in ("series-link-back", "series-teaser-delivered", "series-next-teaser"):
+        assert f"id: {item}" in critic_prompt
+    assert "Summary: Golden sets turn vibes into data." in out
+    assert "Teaser: Next in this series: judges, and when to trust them." in out
+    part = load_series(path).parts[1]
+    assert part.status == "drafted"
+    assert part.summary == "Golden sets turn vibes into data."
+    assert part.teaser == "Next in this series: judges, and when to trust them."
+    critique = (tmp_path / "issue.critique.md").read_text()
+    assert "series-next-teaser" in critique
+
+
+def test_series_issue_warns_when_the_previous_part_has_no_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _series_file(tmp_path)
+    _use_models(monkeypatch)
+    assert _series_issue(tmp_path) == 0
+    out = capsys.readouterr().out
+    assert "Part 1 has no URL yet" in out
+    assert "newsletter-machine series published evals 1 <url>" in out
+
+
+def test_series_issue_still_marks_the_part_drafted_when_the_summary_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _series_file(tmp_path)
+    _use_models(monkeypatch, summary="")
+    assert _series_issue(tmp_path) == 0
+    captured = capsys.readouterr()
+    assert "Could not summarise Part 2" in captured.err
+    assert "No 'Next in this series' line" in captured.err
+    part = load_series(path).parts[1]
+    assert (part.status, part.summary, part.teaser) == ("drafted", "", "")
+
+
+def test_series_issue_exits_2_before_any_model_on_broken_series_checks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from newsletter_machine import series_checks
+
+    _series_file(tmp_path)
+    broken = tmp_path / "checks.yaml"
+    broken.write_text("version: 1\nitems: []\n")
+    monkeypatch.setattr(series_checks, "_checks_path", lambda: broken)
+    built = _use_models(monkeypatch)
+    assert _series_issue(tmp_path) == 2
+    assert "'items' must be a non-empty list" in capsys.readouterr().err
+    assert built == []
+
+
+def test_series_issue_marks_the_part_drafted_when_the_draft_cannot_be_reread(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _series_file(tmp_path)
+    _use_models(monkeypatch)
+    original = Path.read_text
+
+    def _read(self: Path, *args: Any, **kwargs: Any) -> str:
+        if self.name == "issue.md":
+            raise PermissionError("locked")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _read)
+    assert _series_issue(tmp_path) == 0
+    assert "for its summary: locked" in capsys.readouterr().err
+    part = load_series(path).parts[1]
+    assert (part.status, part.summary) == ("drafted", "")

@@ -1,14 +1,15 @@
 """Series mode for ``newsletter-machine issue --series <slug>``.
 
-Before any model call: load and check the series file and pick the next planned part. After
-ingest: drop off-topic sources (listed in ``<stem>.parked.md``). After a fully successful run:
-mark the part drafted. A failed run leaves the series file untouched.
+Before any model call: load and check the series file, pick the next planned part and add the
+series checks to the critic checklist. After ingest: drop off-topic sources (listed in
+``<stem>.parked.md``). After a fully successful run: mark the part drafted with its one-line
+summary and closing teaser. A failed run leaves the series file untouched.
 """
 
 import argparse
 import logging
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from langchain_core.runnables import Runnable
 
 from newsletter_machine.cli_common import EXIT_ERROR, write_reported
 from newsletter_machine.drafting import check_target
+from newsletter_machine.grounding import Grounding
 from newsletter_machine.relevance import (
     Relevance,
     build_relevance_classifier,
@@ -26,8 +28,11 @@ from newsletter_machine.relevance import (
     render_parked,
 )
 from newsletter_machine.series import Series, SeriesPart
+from newsletter_machine.series_checks import load_series_checks, series_checklist
 from newsletter_machine.series_part import (
     check_draftable,
+    following_part,
+    previous_part,
     relevance_context,
     series_angle,
     series_label,
@@ -40,7 +45,14 @@ from newsletter_machine.series_store import (
     mark_drafted,
     series_path,
 )
+from newsletter_machine.series_summary import (
+    build_summariser,
+    extract_teaser,
+    summarise_part,
+    summary_system_prompt,
+)
 from newsletter_machine.sources import SourceDoc
+from newsletter_machine.voice import style_guide_sections
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +83,7 @@ class SeriesTarget:
 class SeriesJob:
     target: SeriesTarget
     classifier: Runnable[Any, Any]
+    summariser: Runnable[Any, Any]
 
     @property
     def label(self) -> str:
@@ -105,8 +118,34 @@ def series_target(args: argparse.Namespace, parked: Path) -> SeriesTarget | None
     return SeriesTarget(args.series, path, series, part, parked)
 
 
-def series_job(target: SeriesTarget, model: BaseChatModel) -> SeriesJob:
-    return SeriesJob(target, build_relevance_classifier(model, relevance_system_prompt()))
+def series_grounding(grounding: Grounding, target: SeriesTarget) -> Grounding:
+    """The voice grounding with this part's series checks added to the checklist, so the
+    writer targets them and the critic judges them (a broken checks file is a usage error)."""
+    checks = load_series_checks(style_guide_sections(grounding.style_guide))
+    checklist = series_checklist(grounding.checklist, target.series, target.part, checks)
+    return replace(grounding, checklist=checklist)
+
+
+def series_job(
+    target: SeriesTarget, relevance_model: BaseChatModel, summary_model: BaseChatModel
+) -> SeriesJob:
+    return SeriesJob(
+        target,
+        build_relevance_classifier(relevance_model, relevance_system_prompt()),
+        build_summariser(summary_model, summary_system_prompt()),
+    )
+
+
+def continuity_note(target: SeriesTarget) -> str | None:
+    """A note when the previous part has no URL yet, so the draft cannot link to it."""
+    previous = previous_part(target.series, target.part)
+    if previous is None or previous.url:
+        return None
+    return (
+        f"Part {previous.number} has no URL yet: the draft gets a [VARUN: ...] marker for the "
+        f"link. Record it with: newsletter-machine series published {target.slug} "
+        f"{previous.number} <url>"
+    )
 
 
 def _print_relevance(relevance: Relevance) -> None:
@@ -141,8 +180,48 @@ def filter_sources(
     return relevance
 
 
+def _summary(job: SeriesJob, text: str) -> str:
+    number = job.target.part.number
+    try:
+        summary = summarise_part(job.summariser, text)
+    except Exception as exc:  # network/API failures surface as many types
+        logger.debug("Summary failed", exc_info=True)
+        print(
+            f"Could not summarise Part {number}: {exc} (add a one-line summary to "
+            f"{job.target.path} by hand)",
+            file=sys.stderr,
+        )
+        return ""
+    print(f"Summary: {summary}")
+    return summary
+
+
+def _teaser(job: SeriesJob, text: str) -> str:
+    teaser = extract_teaser(text)
+    if teaser:
+        print(f"Teaser: {teaser}")
+    elif following_part(job.target.series, job.target.part) is not None:
+        print(
+            "No 'Next in this series' line found in the draft; add one, and the teaser to "
+            f"{job.target.path}, by hand.",
+            file=sys.stderr,
+        )
+    return teaser
+
+
+def _carried_forward(job: SeriesJob, draft: Path) -> tuple[str, str]:
+    """``(summary, teaser)`` of the final draft; blank (with a warning) when unavailable."""
+    try:
+        text = draft.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"Could not read {draft} for its summary: {exc}", file=sys.stderr)
+        return "", ""
+    return _summary(job, text), _teaser(job, text)
+
+
 def finish_series(job: SeriesJob, code: int, draft: Path) -> int:
-    """Mark the part drafted after a fully successful run; leave the file alone otherwise."""
+    """Mark the part drafted (with its summary and teaser) after a fully successful run;
+    leave the file alone otherwise."""
     t = job.target
     if code:
         print(
@@ -150,8 +229,12 @@ def finish_series(job: SeriesJob, code: int, draft: Path) -> int:
             file=sys.stderr,
         )
         return code
+    summary, teaser = _carried_forward(job, draft)
+    reference = draft_reference(t.path, draft)
     try:
-        kept = mark_drafted(t.path, t.slug, t.part.number, draft_reference(t.path, draft))
+        kept = mark_drafted(
+            t.path, t.slug, t.part.number, reference, summary=summary, teaser=teaser
+        )
     except (ValueError, OSError) as exc:
         logger.debug("Series update failed", exc_info=True)
         print(

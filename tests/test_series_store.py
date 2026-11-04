@@ -14,8 +14,10 @@ from newsletter_machine.series_store import (
     draft_reference,
     load_series,
     mark_drafted,
+    plan_publication,
     render_series_yaml,
     save_approval,
+    save_publication,
     save_series,
     series_path,
 )
@@ -378,7 +380,7 @@ def test_mark_drafted_rewrites_when_the_line_edit_would_not_parse(
     from newsletter_machine import series_store
 
     path = _approved_file(tmp_path)
-    monkeypatch.setattr(series_store, "_drafted_text", lambda *a: "topic: [broken\n")
+    monkeypatch.setattr(series_store, "edit_part", lambda *a, **k: "topic: [broken\n")
     assert mark_drafted(path, "evals", 1, "drafts/x.md") is False
     assert load_series(path).parts[0].status == "drafted"
 
@@ -414,3 +416,98 @@ def test_mark_drafted_keeps_comments_when_draft_is_written_as_capital_null(tmp_p
     path = _approved_file(tmp_path)
     path.write_text(path.read_text().replace("  draft: null\n", "  draft: Null\n", 1))
     assert mark_drafted(path, "evals", 1, "drafts/x.md") is True
+
+
+def test_mark_drafted_records_summary_and_teaser_and_keeps_comments(tmp_path: Path) -> None:
+    path = _approved_file(tmp_path)
+    summary, teaser = "Golden sets beat vibes: a claim.", "Next in this series: judges #3."
+    assert mark_drafted(path, "evals", 2, "drafts/b.md", summary=summary, teaser=teaser) is True
+    assert "# Varun: keep this one short" in path.read_text()
+    part = load_series(path).parts[1]
+    assert (part.status, part.draft, part.summary, part.teaser) == (
+        "drafted",
+        "drafts/b.md",
+        summary,
+        teaser,
+    )
+
+
+def test_mark_drafted_rewrites_a_block_scalar_summary(tmp_path: Path) -> None:
+    path = _approved_file(tmp_path)
+    text = path.read_text().replace("  summary: ''\n", "  summary: >-\n    old\n    text\n", 1)
+    path.write_text(text)
+    assert mark_drafted(path, "evals", 1, "drafts/a.md", summary="new") is False
+    assert load_series(path).parts[0].summary == "new"
+
+
+def _drafted_file(series_dir: Path) -> Path:
+    path = _approved_file(series_dir)
+    mark_drafted(path, "evals", 1, "drafts/a.md")
+    return path
+
+
+URL = "https://varunbhanot.substack.com/p/evals-part-1"
+
+
+def test_publication_marks_a_drafted_part_published_and_keeps_comments(tmp_path: Path) -> None:
+    path = _drafted_file(tmp_path)
+    publication = plan_publication(tmp_path, "evals", 1, URL)
+    assert publication.path == path and publication.changed
+    assert save_publication(publication) is True
+    assert "# Varun: keep this one short" in path.read_text()
+    part = load_series(path).parts[0]
+    assert (part.status, part.url, part.draft) == ("published", URL, "drafts/a.md")
+
+
+def test_publication_re_records_a_published_url(tmp_path: Path) -> None:
+    path = _drafted_file(tmp_path)
+    save_publication(plan_publication(tmp_path, "evals", 1, "https://example.com/wrong"))
+    save_publication(plan_publication(tmp_path, "evals", 1, URL))
+    assert load_series(path).parts[0].url == URL
+
+
+def test_publication_of_the_same_url_changes_nothing(tmp_path: Path) -> None:
+    path = _drafted_file(tmp_path)
+    save_publication(plan_publication(tmp_path, "evals", 1, URL))
+    before = path.read_text()
+    again = plan_publication(tmp_path, "evals", 1, f" {URL} ")
+    assert not again.changed
+    assert save_publication(again) is True
+    assert path.read_text() == before
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["ftp://example.com/p", "example.com/p", "https://exa mple.com", "https://", "http:///p", ""],
+)
+def test_publication_refuses_a_bad_url(tmp_path: Path, url: str) -> None:
+    _drafted_file(tmp_path)
+    with pytest.raises(ValueError, match="http"):
+        plan_publication(tmp_path, "evals", 1, url)
+
+
+def test_publication_refuses_a_planned_part(tmp_path: Path) -> None:
+    _drafted_file(tmp_path)
+    with pytest.raises(ValueError, match="Part 2 is planned"):
+        plan_publication(tmp_path, "evals", 2, URL)
+
+
+def test_publication_refuses_a_missing_part(tmp_path: Path) -> None:
+    _drafted_file(tmp_path)
+    with pytest.raises(ValueError, match="no Part 4"):
+        plan_publication(tmp_path, "evals", 4, URL)
+
+
+def test_publication_rewrites_a_flow_style_file(tmp_path: Path) -> None:
+    path = _drafted_file(tmp_path)
+    path.write_text(yaml.safe_dump(yaml.safe_load(path.read_text()), default_flow_style=True))
+    assert save_publication(plan_publication(tmp_path, "evals", 1, URL)) is False
+    assert load_series(path).parts[0].status == "published"
+
+
+def test_publication_refuses_a_part_changed_since_it_was_checked(tmp_path: Path) -> None:
+    path = _drafted_file(tmp_path)
+    publication = plan_publication(tmp_path, "evals", 1, URL)
+    save_series(path, _series("approved"), "evals")  # Part 1 back to planned meanwhile
+    with pytest.raises(ValueError, match="Part 1 is planned"):
+        save_publication(publication)

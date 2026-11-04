@@ -235,6 +235,10 @@ def _part_lines(part: SeriesPart) -> list[str]:
         lines.append(f"  Draft: {part.draft}")
     if part.url:
         lines.append(f"  URL: {part.url}")
+    if part.summary:
+        lines.append(f"  Summary: {part.summary}")
+    if part.teaser:
+        lines.append(f"  Teaser: {part.teaser}")
     return lines
 
 
