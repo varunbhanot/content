@@ -97,3 +97,10 @@ def test_edit_part_keeps_a_double_quoted_value_and_its_comment() -> None:
     )
     assert edited is not None
     assert _part(edited, 0)["url"] == "https://c.d" and "# it's live" in edited
+
+
+def test_edit_part_gives_up_on_a_key_whose_value_spans_lines() -> None:
+    text = TEXT.replace("  summary: ''\n", '  summary: "old one\n    old two"\n')
+    assert (
+        edit_part(text, 1, statuses=("drafted",), status="drafted", fields={"summary": "n"}) is None
+    )

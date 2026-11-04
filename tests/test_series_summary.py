@@ -38,6 +38,7 @@ def test_extract_teaser_finds_the_italic_next_line() -> None:
         "**Next in this series:** Part 3, judges.",
         "> *Next in this series: Part 3, judges.*",
         "_Next in this series: Part 3, judges._",
+        "_Next in this series:_ Part 3, judges.",
     ],
 )
 def test_extract_teaser_accepts_common_emphasis_forms(line: str) -> None:
@@ -109,3 +110,14 @@ def test_the_final_part_check_and_the_teaser_regex_agree(line: str, hit: bool) -
     draft = f"# T\n\n{line}\n"
     assert bool(extract_teaser(draft)) is hit
     assert any(p.search(draft) for p in item.patterns) is hit
+
+
+def test_extract_teaser_keeps_markers_inside_words_and_links() -> None:
+    draft = "*Next in this series: [snake_case evals](https://x.com/a*b).*\n"
+    assert extract_teaser(draft) == "Next in this series: [snake_case evals](https://x.com/a*b)."
+
+
+def test_summarise_part_cuts_a_long_answer_at_a_word() -> None:
+    summariser = build_summariser(fake("abcdefghij " * 40), "system")
+    summary = summarise_part(summariser, DRAFT)
+    assert summary.endswith("abcdefghij…")

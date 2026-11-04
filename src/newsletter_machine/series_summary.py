@@ -30,7 +30,7 @@ MAX_SUMMARY_CHARS = 300  # one sentence; the series file and the next angle stay
 TEASER_LINE = re.compile(
     r"^[ \t]*(?:>[ \t]*)?[*_]+Next in this series\b.*$", re.IGNORECASE | re.MULTILINE
 )
-EMPHASIS = re.compile(r"\*+|^_+|_+$")
+EMPHASIS = re.compile(r"(?<!\w)[*_]+|[*_]+(?!\w)")  # markers at word edges, not a*b or a_b
 
 
 def extract_teaser(draft: str) -> str:
@@ -65,7 +65,9 @@ def summary_task(draft: str) -> str:
 def _capped(text: str) -> str:
     if len(text) <= MAX_SUMMARY_CHARS:
         return text
-    return text[: MAX_SUMMARY_CHARS - 1].rstrip() + "…"
+    cut = text[:MAX_SUMMARY_CHARS]
+    head = cut.rsplit(" ", 1)[0] if " " in cut else cut[: MAX_SUMMARY_CHARS - 1]
+    return head.rstrip(" ,;:") + "…"
 
 
 def summarise_part(summariser: Runnable[Any, Any], draft: str) -> str:

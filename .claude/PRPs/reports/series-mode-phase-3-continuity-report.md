@@ -29,7 +29,7 @@
 |---|---|---|
 | ruff check / format | Pass | |
 | mypy src | Pass | 45 files |
-| pytest --cov | Pass | 833 passed, 10 live deselected; 99% coverage |
+| pytest --cov | Pass | 860 passed, 10 live deselected; 99% coverage |
 | Wheel contents | Pass | `series_checks.yaml`, `prompts/summary.md` packaged |
 
 ## Deviations from Plan
@@ -38,3 +38,9 @@
 
 ## Tests Written
 `test_series_edit.py` (5), `test_series_summary.py` (11), `test_series_checks.py` (7), `test_series_summary_live.py` (1 live), plus additions to `test_series_store.py`, `test_series_part.py`, `test_series.py`, `test_cli_series.py`, `test_cli_issue_series.py`, `test_config.py`.
+
+## Review fixes (3 rounds, `/code-review high`)
+- Round 1: trailing comments with quotes/apostrophes are kept (regression vs Phase 2); quoted values matched whole; teaser regex accepts bold, partly emphasised and quoted lines; the final part never records a teaser; the final-part check matches only an emphasised line; the previous part is listed once; one URL validator (`is_web_url`).
+- Round 2: draft-derived text (previous summary, teaser) is kept out of system prompts: the critic gets it as `<series_context>` data in its user message; `series-link-back` lets the link-back clause precede the opening move (no clash with `opening-move`); a `* ` bullet is not a teaser; the part is re-checked before the paid summary call; the record follows the new draft (a blank summary/teaser clears a stale one, reverting a round-1 change); `is_web_url` never raises; shared `_model_or`.
+- Round 3: earlier summaries and the teaser reach the editor/researcher/writer as a tagged `<series_context>` block marked data, not as angle instructions; a key whose value spans lines triggers a full rewrite instead of a duplicate key; emphasis is stripped only at word edges; long summaries are cut at a word; dead `save_publication` branch removed; `NOT_PUBLISHED` constant.
+- Declined: round-trip YAML library (new dependency; Phase 2's verified line-edit pattern kept); a series-specific checklist version in reports (base version kept, series label line marks series critiques); exempting bundled checks from the style-guide section check (fail fast, same coupling as the voice checklist); tightening source URLs (they match ingest by design); deriving the YAML teaser pattern from Python (a test pins both to the same cases).

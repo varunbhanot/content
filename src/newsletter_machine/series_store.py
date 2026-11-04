@@ -221,12 +221,18 @@ def _write_part_edit(path: Path, slug: str, text: str, expected: Series, edit: _
     return kept
 
 
-def _drafted_series(path: Path, series: Series, edit: _PartEdit) -> Series:
-    part = _find_part(path, series, edit.number)
+def _planned_part(path: Path, series: Series, number: int) -> SeriesPart:
+    """Part ``number``, still planned in a still approved series."""
+    part = _find_part(path, series, number)
     if part.status != "planned":
-        raise ValueError(f"{path}: Part {edit.number} is {part.status}, not planned.")
+        raise ValueError(f"{path}: Part {number} is {part.status}, not planned.")
     if series.status != "approved":
         raise ValueError(f"{path} is now {series.status}, no longer approved.")
+    return part
+
+
+def _drafted_series(path: Path, series: Series, edit: _PartEdit) -> Series:
+    part = _planned_part(path, series, edit.number)
     fields = edit.fields
     drafted = replace(
         part,
@@ -241,8 +247,7 @@ def _drafted_series(path: Path, series: Series, edit: _PartEdit) -> Series:
 def check_markable(path: Path, number: int) -> None:
     """``ValueError`` unless part ``number`` can still be marked drafted (re-read now: Varun
     may have edited the file during the run), checked before any paid follow-up call."""
-    probe = _PartEdit(number, ("planned",), "drafted", {"draft": "", "summary": "", "teaser": ""})
-    _drafted_series(path, load_series(path), probe)
+    _planned_part(path, load_series(path), number)
 
 
 def mark_drafted(
@@ -304,8 +309,6 @@ def plan_publication(series_dir: Path, slug: str, number: int, url: str) -> Publ
 
 def save_publication(publication: Publication) -> bool:
     """Record the URL (re-checking the file first); True when comments were kept."""
-    if not publication.changed:
-        return True
     p = publication
     text = _read(p.path)
     expected = _published_series(p.path, _parse_text(p.path, text), p.number, p.url)

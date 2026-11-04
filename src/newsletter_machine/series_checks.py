@@ -16,7 +16,7 @@ from string import Template
 
 from newsletter_machine.checklist import Checklist, ChecklistItem, load_checklist
 from newsletter_machine.series import Series, SeriesPart
-from newsletter_machine.series_part import following_part, previous_part
+from newsletter_machine.series_part import NOT_PUBLISHED, following_part, previous_part
 from newsletter_machine.writer import neutralise_tags
 
 CHECKS_FILE = "series_checks.yaml"
@@ -72,7 +72,7 @@ def _values(previous: SeriesPart | None, following: SeriesPart | None) -> dict[s
         values |= {
             "previous_number": str(previous.number),
             "previous_title": previous.title,
-            "previous_link": previous.url or "not published yet",
+            "previous_link": previous.url or NOT_PUBLISHED,
         }
     if following is not None:
         values |= {

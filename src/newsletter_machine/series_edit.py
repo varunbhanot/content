@@ -58,8 +58,11 @@ def edit_part(
     missing: list[str] = []
     for field, value in fields.items():
         body, found = _set_field(body, key, field, value)
-        if not found:
-            missing.append(_line(key, field, value, None))
+        if found:
+            continue
+        if re.search(rf"^{key}{re.escape(field)}:", body, re.MULTILINE):
+            return None  # the key is there but not as one line: no duplicate key, rewrite
+        missing.append(_line(key, field, value, None))
     choices = "|".join(re.escape(s) for s in statuses)
     status_line = re.compile(rf"^{key}status:[ \t]*(['\"]?)(?:{choices})\1{COMMENT}", re.MULTILINE)
     added = "".join(f"\n{line}" for line in missing)
