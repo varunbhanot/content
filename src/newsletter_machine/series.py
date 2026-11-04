@@ -2,12 +2,14 @@
 
 Varun edits these files by hand, so every field is checked and an error names the file, the
 part and the field. Fields used by later phases (``draft``, ``url``, ``summary``, ``teaser``)
-are optional and only type-checked here.
+are optional and only type-checked here. ``revisions`` (optional) records each time the
+remaining outline was revised; files written before it existed load unchanged.
 """
 
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Any, Literal, get_args
 from urllib.parse import urlsplit
 
@@ -17,10 +19,11 @@ SeriesStatus = Literal["proposed", "approved", "complete"]
 Access = Literal["free", "paid"]
 PartStatus = Literal["planned", "drafted", "published"]
 
-SERIES_FIELDS = ("topic", "status", "parts")
+SERIES_FIELDS = ("topic", "status", "parts", "revisions")  # revisions is optional
 PART_REQUIRED = ("number", "title", "question", "brief", "arc", "access", "status", "sources")
 PART_OPTIONAL = ("thin", "needs", "draft", "url", "summary", "teaser")
 SOURCE_FIELDS = frozenset({"title", "url"})
+REVISION_FIELDS = frozenset({"date", "reason", "changes"})
 MIN_ARC_STEPS = 2
 SLUG_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)  # as ingest accepts them
@@ -55,10 +58,20 @@ class SeriesPart:
 
 
 @dataclass(frozen=True)
+class Revision:
+    """One revision of the remaining outline: when, why, and what changed."""
+
+    date: str  # ISO date, YYYY-MM-DD
+    reason: str
+    changes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Series:
     topic: str
     status: SeriesStatus
     parts: tuple[SeriesPart, ...]
+    revisions: tuple[Revision, ...] = ()  # oldest first
 
 
 def is_web_url(value: str) -> bool:
@@ -183,6 +196,44 @@ def _parse_part(raw: object, path: str, index: int) -> SeriesPart:
     )
 
 
+def _revision_date(value: object, where: str) -> str:
+    # YAML reads an unquoted 2026-11-11 as a date; a time of day is not a revision date
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value.strip()).isoformat()
+        except ValueError:
+            pass
+    raise ValueError(f"{where}: 'date' must be a date like 2026-11-11 (got {value!r})")
+
+
+def _changes(value: object, where: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
+        raise ValueError(f"{where}: 'changes' must be a list of non-empty lines")
+    return tuple(line.strip() for line in value)
+
+
+def _revision(raw: object, path: str, index: int) -> Revision:
+    where = f"{path}: revision #{index}"
+    if not isinstance(raw, dict) or set(raw) != REVISION_FIELDS:
+        raise ValueError(f"{where} must have only 'date', 'reason' and 'changes'")
+    return Revision(
+        date=_revision_date(raw["date"], where),
+        reason=non_empty_text(raw, "reason", where),
+        changes=_changes(raw["changes"], where),
+    )
+
+
+def _revisions(data: Mapping[str, Any], path: str) -> tuple[Revision, ...]:
+    value = data.get("revisions")
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError(f"{path}: 'revisions' must be a list (or left out)")
+    return tuple(_revision(raw, path, index) for index, raw in enumerate(value, start=1))
+
+
 def parse_series(data: object, path: str) -> Series:
     """Validate a parsed YAML document; ``ValueError`` names ``path``, the part and the field."""
     if not isinstance(data, dict):
@@ -197,6 +248,7 @@ def parse_series(data: object, path: str) -> Series:
         topic=non_empty_text(data, "topic", path),
         status=one_of(path, "status", data.get("status"), get_args(SeriesStatus)),
         parts=tuple(_parse_part(raw, path, index) for index, raw in enumerate(raw_parts, start=1)),
+        revisions=_revisions(data, path),
     )
 
 
@@ -220,12 +272,19 @@ def _part_mapping(part: SeriesPart) -> dict[str, Any]:
 
 
 def series_to_mapping(series: Series) -> dict[str, Any]:
-    """The YAML-ready form; ``parse_series`` reads it back to an equal ``Series``."""
-    return {
+    """The YAML-ready form; ``parse_series`` reads it back to an equal ``Series``. A series
+    never revised has no ``revisions`` key, as before revisions existed."""
+    mapping: dict[str, Any] = {
         "topic": series.topic,
         "status": series.status,
         "parts": [_part_mapping(part) for part in series.parts],
     }
+    if series.revisions:
+        mapping["revisions"] = [
+            {"date": r.date, "reason": r.reason, "changes": list(r.changes)}
+            for r in series.revisions
+        ]
+    return mapping
 
 
 def _sources_line(sources: Sequence[SourceRef]) -> str:
@@ -258,4 +317,5 @@ def format_outline(series: Series, slug: str) -> str:
     lines = [f"Series '{slug}' ({series.status}): {series.topic}"]
     for part in series.parts:
         lines.extend(_part_lines(part))
+    lines.extend(f"Revised {r.date}: {r.reason}" for r in series.revisions)
     return "\n".join(lines) + "\n"

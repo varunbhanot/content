@@ -2,7 +2,8 @@
 
 Off-topic sources are parked, not deleted: they stay in ``<date>.sources/`` and are listed in
 ``<date>.parked.md``. A source whose check fails is kept (wrongly dropping a link costs more
-than keeping a weak one) and reported as unchecked.
+than keeping a weak one) and reported as unchecked. The same call names the outline part each
+source best supports, so ``issue --series`` can tell when a week fits another part better.
 """
 
 import logging
@@ -28,6 +29,7 @@ RELEVANCE_NAME = "relevance"
 RELEVANCE_SOURCE_CHARS = 4_000  # an excerpt is enough to judge the topic, and keeps calls cheap
 RELEVANCE_CONCURRENCY = 4  # as the researcher: sources are independent
 PARKED_TITLE = "# Parked sources"
+NO_LISTED_PART = 0  # best_part when an on-topic source fits no part in the outline
 
 
 class RelevanceVerdict(BaseModel):
@@ -35,6 +37,12 @@ class RelevanceVerdict(BaseModel):
 
     on_topic: bool = Field(description="True when the source helps any part of the series.")
     reason: str = Field(description="One short line explaining the verdict.")
+    # optional so a verdict without it still parks or keeps the source; None is "not said",
+    # which the fit check ignores (never a vote for a new topic)
+    best_part: int | None = Field(
+        default=None,
+        description="Number of the outline part this source would help most; 0 when none fits.",
+    )
 
 
 @dataclass(frozen=True)
@@ -46,6 +54,15 @@ class SourceNote:
 
 
 @dataclass(frozen=True)
+class SourceFit:
+    """An on-topic source and the outline part it best supports (``NO_LISTED_PART``: none
+    fits; None: the model did not say)."""
+
+    doc: SourceDoc
+    part: int | None
+
+
+@dataclass(frozen=True)
 class Relevance:
     """``kept``: on-topic, unchecked and failed sources in their original order (failed ones
     stay so the notes still list them as skipped); ``parked``: off-topic sources."""
@@ -54,6 +71,7 @@ class Relevance:
     parked: tuple[SourceNote, ...]
     unchecked: tuple[SourceNote, ...]  # kept because their check failed; reason = the error
     on_topic: int  # usable sources judged on-topic
+    fits: tuple[SourceFit, ...] = ()  # one per on-topic source, in order
 
     @property
     def all_unchecked(self) -> bool:
@@ -117,18 +135,22 @@ def classify_sources(
     verdicts = _judge(classifier, usable, context) if usable else []
     parked: list[SourceNote] = []
     unchecked: list[SourceNote] = []
+    fits: list[SourceFit] = []
     for doc, verdict in zip(usable, verdicts, strict=True):
         if isinstance(verdict, str):
             logger.warning("Relevance check on %s failed, kept: %s", doc.url, verdict)
             unchecked.append(SourceNote(doc, verdict))
         elif not verdict.on_topic:
             parked.append(SourceNote(doc, verdict.reason))
+        else:
+            fits.append(SourceFit(doc, verdict.best_part))
     parked_ids = {id(item.doc) for item in parked}  # by identity: equal duplicates stay apart
     return Relevance(
         kept=tuple(doc for doc in docs if id(doc) not in parked_ids),
         parked=tuple(parked),
         unchecked=tuple(unchecked),
-        on_topic=len(usable) - len(parked) - len(unchecked),
+        on_topic=len(fits),
+        fits=tuple(fits),
     )
 
 

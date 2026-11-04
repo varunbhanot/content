@@ -1,8 +1,11 @@
+import re
+from datetime import date, datetime
 from typing import Any
 
 import pytest
 
 from newsletter_machine.series import (
+    Revision,
     Series,
     SeriesPart,
     SourceRef,
@@ -213,3 +216,59 @@ def test_is_web_url_rejects_bad_addresses_without_raising(url: str) -> None:
     from newsletter_machine.series import is_web_url
 
     assert is_web_url(url) is False
+
+
+REVISION = {"date": "2026-11-11", "reason": "Links fit judges.", "changes": ["Part 2 is new"]}
+
+
+def test_files_without_revisions_load_and_round_trip_without_the_key() -> None:
+    series = parse_series(_data(), "series/evals.yaml")
+
+    assert series.revisions == ()
+    assert "revisions" not in series_to_mapping(series)
+
+
+def test_revisions_are_parsed_and_round_trip() -> None:
+    series = parse_series(_data(revisions=[REVISION]), "series/evals.yaml")
+
+    assert series.revisions == (Revision("2026-11-11", "Links fit judges.", ("Part 2 is new",)),)
+    assert parse_series(series_to_mapping(series), "x") == series
+
+
+def test_an_unquoted_yaml_date_is_accepted() -> None:
+    raw = {**REVISION, "date": date(2026, 11, 11), "changes": []}
+
+    series = parse_series(_data(revisions=[raw]), "series/evals.yaml")
+
+    assert series.revisions[0].date == "2026-11-11"
+    assert series.revisions[0].changes == ()
+
+
+def test_null_revisions_read_as_none() -> None:
+    assert parse_series(_data(revisions=None), "x").revisions == ()
+
+
+@pytest.mark.parametrize(
+    ("revisions", "message"),
+    [
+        ("yes", "'revisions' must be a list"),
+        (["x"], "revision #1 must have only 'date', 'reason' and 'changes'"),
+        ([{**REVISION, "extra": 1}], "revision #1 must have only"),
+        ([{**REVISION, "date": "11/11/2026"}], "revision #1: 'date' must be a date"),
+        ([{**REVISION, "date": datetime(2026, 11, 11, 9)}], "revision #1: 'date' must be a date"),
+        ([{**REVISION, "reason": " "}], "revision #1: 'reason' must be non-empty text"),
+        ([{**REVISION, "changes": "a"}], "revision #1: 'changes' must be a list of"),
+        ([{**REVISION, "changes": ["", "b"]}], "revision #1: 'changes' must be a list of"),
+    ],
+)
+def test_invalid_revisions_are_named(revisions: Any, message: str) -> None:
+    with pytest.raises(ValueError, match=re.escape(message)) as error:
+        parse_series(_data(revisions=revisions), "series/evals.yaml")
+
+    assert "series/evals.yaml" in str(error.value)
+
+
+def test_format_outline_lists_revisions() -> None:
+    series = parse_series(_data(revisions=[REVISION]), "x")
+
+    assert "Revised 2026-11-11: Links fit judges.\n" in format_outline(series, "evals")

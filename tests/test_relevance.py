@@ -8,6 +8,7 @@ from fakes import relevance_fake
 from newsletter_machine.prompts import load_prompt
 from newsletter_machine.relevance import (
     RELEVANCE_SOURCE_CHARS,
+    SourceFit,
     SourceNote,
     build_relevance_classifier,
     classify_sources,
@@ -127,3 +128,22 @@ def test_unchecked_lines_stay_on_one_line() -> None:
     assert source_lines(result.unchecked) == (
         "- [Title a](https://example.com/a): _Boom: line one line two",
     )
+
+
+def test_classify_records_the_part_each_on_topic_source_best_supports() -> None:
+    docs = (_doc("judges"), _doc("pricing"), _doc("golden"), _doc("flaky"))
+    fake = relevance_fake(off=("pricing",), fail=("flaky",), parts={"judges": 3, "golden": 2})
+    classifier = build_relevance_classifier(fake, relevance_system_prompt())
+    result = classify_sources(classifier, docs, CONTEXT)
+    assert result.fits == (SourceFit(docs[0], 3), SourceFit(docs[2], 2))
+
+
+def test_a_verdict_without_a_part_records_none_not_a_new_topic() -> None:
+    context = "Series topic: evals"  # no part marked: the fake leaves best_part out
+    result = classify_sources(_classifier(), (_doc("a"),), context)  # type: ignore[arg-type]
+    assert result.fits == (SourceFit(result.kept[0], None),)
+
+
+def test_prompt_explains_best_part() -> None:
+    assert load_prompt("relevance").version >= 2
+    assert "best_part" in relevance_system_prompt()

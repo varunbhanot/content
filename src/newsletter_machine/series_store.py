@@ -31,6 +31,11 @@ DEFAULT_SERIES_DIR = Path("series")
 SERIES_SUFFIX = ".yaml"
 STATUS_LINE = re.compile(r"^status:[ \t]*(['\"]?)proposed\1([ \t]+#.*)?[ \t]*$", re.MULTILINE)
 ANY_STATUS_LINE = re.compile(r"^status:[ \t]*['\"]?([A-Za-z]+)", re.MULTILINE)
+# read leniently (the file may be broken): a written part or a revision history
+HISTORY_LINE = re.compile(
+    r"^(?:[ \t]*(?:-[ \t]+)?status:[ \t]*['\"]?(?:drafted|published)\b|revisions:)", re.MULTILINE
+)
+BACKUP_SUFFIX = ".bak"
 HEADER = (
     "# Series plan: {slug}. Edit any field by hand; `newsletter-machine series show {slug}`\n"
     "# checks it. When the outline is right: newsletter-machine series approve {slug}\n"
@@ -124,8 +129,18 @@ def check_can_plan(path: Path, *, overwrite: bool) -> None:
             f"{path} is {status or 'unreadable'}; only a proposed outline is re-planned. "
             "Plan under another topic name, or fix or delete the file by hand."
         )
+    if _has_history(path):
+        raise ValueError(
+            f"{path} has drafted or published parts or revisions, so it is never re-planned "
+            "from scratch. Use: newsletter-machine series revise <slug>"
+        )
     if not overwrite:
         raise FileExistsError(f"{path} exists; pass --overwrite to replace the proposed outline.")
+
+
+def _has_history(path: Path) -> bool:
+    """Read only after the status was: an unreadable file has already been refused."""
+    return bool(HISTORY_LINE.search(path.read_text(encoding="utf-8")))
 
 
 def approved_slugs(series_dir: Path) -> tuple[str, ...]:
@@ -336,3 +351,29 @@ def draft_reference(path: Path, draft: Path) -> str:
 def draft_location(path: Path, reference: str) -> Path:
     """The absolute draft path a series file's ``draft`` field names (see ``draft_reference``)."""
     return (_project_root(path) / reference).resolve()
+
+
+def backup_path(path: Path) -> Path:
+    """The first free of ``<slug>.yaml.bak``, ``<slug>.yaml.2.bak``, ...: an earlier backup
+    (e.g. the approved outline before two revisions) is never overwritten. Not ``*.yaml``, so
+    never read as a series."""
+    candidate, copy = path.with_name(f"{path.name}{BACKUP_SUFFIX}"), 1
+    while candidate.exists():
+        copy += 1
+        candidate = path.with_name(f"{path.name}.{copy}{BACKUP_SUFFIX}")
+    return candidate
+
+
+def save_revision(path: Path, slug: str, before: Series, revised: Series) -> Path:
+    """Write a revised outline in full, after copying the current file (with Varun's comments)
+    to ``<slug>.yaml.bak``. Refuses when the file no longer matches ``before`` (edited during
+    the run), so a hand edit is never overwritten. Returns the backup path."""
+    text = _read(path)
+    if _parse_text(path, text) != before:
+        raise ValueError(f"{path} changed during the run; the revised outline was not written.")
+    _parse_text(path, render_series_yaml(revised, slug))  # never back up for a broken write
+    backup = backup_path(path)
+    write_atomic(backup, text)
+    save_series(path, revised, slug)
+    logger.info("Revised %s (backup %s)", path, backup)
+    return backup

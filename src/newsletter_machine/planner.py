@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from newsletter_machine.agent import AgentOutputError
 from newsletter_machine.ingest import SOURCES_SUFFIX, has_ingested_sources, read_sources
+from newsletter_machine.model_middleware import model_retry
 from newsletter_machine.prompts import Prompt, load_prompt, render
 from newsletter_machine.series import MIN_ARC_STEPS, Series, SeriesPart, SourceRef
 from newsletter_machine.sources import SourceDoc, normalize_url
@@ -77,7 +78,7 @@ def saved_source_dirs(drafts_dir: Path, since: date) -> tuple[Path, ...]:
     return tuple(path for day, path in sorted(dated) if day >= since)
 
 
-def _dedupe(docs: Iterable[SourceDoc]) -> tuple[SourceDoc, ...]:
+def dedupe_sources(docs: Iterable[SourceDoc]) -> tuple[SourceDoc, ...]:
     """One doc per normalised URL: first position kept; the newest copy wins, except that a
     fallback (e.g. a video description) never replaces an earlier full text."""
     by_url: dict[str, SourceDoc] = {}
@@ -92,7 +93,7 @@ def _dedupe(docs: Iterable[SourceDoc]) -> tuple[SourceDoc, ...]:
 def collect_sources(drafts_dir: Path, since: date) -> PlanningInput:
     """Usable saved sources in the window; none is a usage error (raised before any model call)."""
     dirs = tuple(d for d in saved_source_dirs(drafts_dir, since) if has_ingested_sources(d))
-    docs = _dedupe(doc for folder in dirs for doc in usable_sources(read_sources(folder)))
+    docs = dedupe_sources(doc for folder in dirs for doc in usable_sources(read_sources(folder)))
     if not docs:
         raise ValueError(
             f"No usable saved sources in {drafts_dir} since {since:%Y-%m-%d} "
@@ -122,14 +123,25 @@ def planner_task(topic: str, docs: Sequence[SourceDoc]) -> str:
     return f"Series topic: {topic}\n\nSaved sources from the last few weeks:\n\n{sources}"
 
 
-def build_planner(model: BaseChatModel, system_prompt: str) -> Runnable[Any, Any]:
-    """A tool-less agent with structured output (strategy picked per model, as for the critic)."""
+def build_planner(
+    model: BaseChatModel, system_prompt: str, response_format: type[BaseModel] = SeriesPlan
+) -> Runnable[Any, Any]:
+    """A tool-less agent with structured output (strategy picked per model, as for the critic).
+
+    Retries only, no prompt caching: the planner runs once per command and its system prompt
+    is below the cacheable minimum, so a cache write would never be read back.
+    """
     return create_agent(
-        model, tools=[], system_prompt=system_prompt, response_format=SeriesPlan, name=PLANNER_NAME
+        model,
+        tools=[],
+        system_prompt=system_prompt,
+        response_format=response_format,
+        middleware=[model_retry()],
+        name=PLANNER_NAME,
     )
 
 
-def _check_part(part: PlannedPart, number: int) -> None:
+def check_part(part: PlannedPart, number: int) -> None:
     for name in ("title", "question", "brief"):
         if not getattr(part, name).strip():
             raise AgentOutputError(f"The planner returned part {number} with an empty {name}.")
@@ -139,23 +151,24 @@ def _check_part(part: PlannedPart, number: int) -> None:
         )
 
 
-def _coverage(indexes: Sequence[int], docs: Sequence[SourceDoc]) -> tuple[SourceRef, ...]:
+def coverage(indexes: Sequence[int], docs: Sequence[SourceDoc]) -> tuple[SourceRef, ...]:
     """Map cited numbers to sources; unknown numbers are dropped, repeats kept once."""
     unknown = sorted({i for i in indexes if not 1 <= i <= len(docs)})
     if unknown:
         logger.warning("Planner cited unknown source numbers, ignored: %s", unknown)
     valid = dict.fromkeys(i for i in indexes if 1 <= i <= len(docs))
-    return tuple(_source_ref(docs[i - 1]) for i in valid)
+    return tuple(source_ref(docs[i - 1]) for i in valid)
 
 
-def _source_ref(doc: SourceDoc) -> SourceRef:
+def source_ref(doc: SourceDoc) -> SourceRef:
     """Title as ingested, or the URL when the page had no usable title."""
     return SourceRef(title=doc.title.strip() or doc.url, url=doc.url)
 
 
-def _to_part(planned: PlannedPart, number: int, docs: Sequence[SourceDoc]) -> SeriesPart:
-    _check_part(planned, number)
-    sources = _coverage(planned.source_indexes, docs)
+def to_part(planned: PlannedPart, number: int, sources: tuple[SourceRef, ...]) -> SeriesPart:
+    """A ``planned`` part numbered by code: Part 1 is always free, and fewer than
+    ``MIN_PART_SOURCES`` supporting sources marks it thin."""
+    check_part(planned, number)
     access = "free" if number == 1 else planned.access
     if access != planned.access:
         logger.info("Part 1 marked free (the planner proposed %s)", planned.access)
@@ -187,6 +200,7 @@ def run_planner(planner: Runnable[Any, Any], topic: str, docs: Sequence[SourceDo
             f"The planner proposed {count} parts; a series has {MIN_PARTS} to {MAX_PARTS}."
         )
     parts = tuple(
-        _to_part(planned, number, docs) for number, planned in enumerate(output.parts, start=1)
+        to_part(planned, number, coverage(planned.source_indexes, docs))
+        for number, planned in enumerate(output.parts, start=1)
     )
     return Series(topic=topic, status="proposed", parts=parts)

@@ -13,6 +13,7 @@ from newsletter_machine.series_part import (
     relevance_context,
     series_angle,
     series_label,
+    split_outline,
 )
 from newsletter_machine.writer import angle_line
 
@@ -88,6 +89,14 @@ def test_relevance_context_lists_topic_and_outline_with_the_current_part() -> No
     assert text.startswith("Series topic: evals")
     assert "Part 1: Title 1. Question 1? (this part)" in text
     assert "Part 2: Title 2. Question 2?" in text
+
+
+def test_relevance_context_marks_parts_already_written() -> None:
+    series = _series("published", "drafted", "planned")
+    text = relevance_context(series, series.parts[2])
+    assert "Part 1: Title 1. Question 1? (published)" in text
+    assert "Part 2: Title 2. Question 2? (drafted)" in text
+    assert "Part 3: Title 3. Question 3? (this part)" in text
 
 
 def test_series_label_names_series_part_and_access() -> None:
@@ -214,3 +223,20 @@ def test_series_context_cannot_close_its_own_tag() -> None:
     series = replace(series, parts=(part, series.parts[1]))
     text = series_angle(series, series.parts[1])
     assert text.count("</series_context>") == 1
+
+
+def test_split_outline_separates_written_parts_from_planned_ones() -> None:
+    series = _series("published", "drafted", "planned", "planned")
+    frozen, planned = split_outline(series, PATH)
+    assert [p.number for p in frozen] == [1, 2]
+    assert [p.number for p in planned] == [3, 4]
+
+
+def test_split_outline_needs_a_planned_part() -> None:
+    with pytest.raises(ValueError, match="no planned part left to revise"):
+        split_outline(_series("published", "drafted"), PATH)
+
+
+def test_split_outline_needs_written_parts_first() -> None:
+    with pytest.raises(ValueError, match="Part 3 is drafted after a planned part"):
+        split_outline(_series("published", "planned", "drafted"), PATH)

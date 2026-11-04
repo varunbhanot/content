@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
-from fakes import fake
+from fakes import connection_error, fake, flaky
 from newsletter_machine.agent import AgentOutputError
 from newsletter_machine.ingest import write_sources
 from newsletter_machine.planner import (
@@ -227,3 +227,10 @@ def test_run_planner_uses_url_when_a_source_has_no_title() -> None:
     series = run_planner(_planner(reply), "evals", (untitled, *DOCS))
 
     assert series.parts[0].sources[0].title == "https://example.com/x"
+
+
+def test_planner_retries_a_transient_model_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("langchain.agents.middleware.model_retry.time.sleep", lambda _: None)
+    model = flaky([connection_error()], plan_reply(_part(), _part(), _part()))
+    series = run_planner(build_planner(model, "system"), "evals", DOCS)
+    assert len(series.parts) == 3 and model.calls == 2
