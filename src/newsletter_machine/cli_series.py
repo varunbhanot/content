@@ -1,5 +1,5 @@
-"""``newsletter-machine series plan | approve | show | published``: propose, lock and read a
-series outline, and record where a part went live.
+"""``newsletter-machine series plan | approve | show | published | revise``: propose, lock and
+read a series outline, record where a part went live, and revise the remaining parts.
 
 Exit codes as elsewhere: 0 done, 1 model or write failure, 2 configuration or usage error
 (always before any model call). ``approve``, ``show`` and ``published`` need no API key.
@@ -18,6 +18,7 @@ from langchain_core.runnables import Runnable
 
 from newsletter_machine.agent import make_chat_model
 from newsletter_machine.cli_common import EXIT_CONFIG, EXIT_ERROR, configure_logging
+from newsletter_machine.cli_series_revise import RevisionJob, apply_revision
 from newsletter_machine.config import (
     ConfigError,
     issue_timezone,
@@ -33,6 +34,7 @@ from newsletter_machine.planner import (
     run_planner,
 )
 from newsletter_machine.series import format_outline
+from newsletter_machine.series_revise import build_reviser, check_revisable
 from newsletter_machine.series_store import (
     DEFAULT_SERIES_DIR,
     check_approval,
@@ -49,6 +51,7 @@ from newsletter_machine.sources import parse_since
 logger = logging.getLogger(__name__)
 
 DEFAULT_PLAN_SINCE = "28d"
+DEFAULT_REVISE_SINCE = "7d"  # a revision follows one week's reading
 DEFAULT_DRAFTS_DIR = Path("drafts")
 # settings, --since, sources, series file, prompt, model provider package missing
 USAGE_ERRORS = (ConfigError, ValueError, KeyError, OSError, ImportError)
@@ -63,24 +66,30 @@ def _series_dir_option(parser: Any) -> None:
     )
 
 
-def add_series_parser(sub: Any) -> None:
-    series = sub.add_parser("series", help="Plan, approve, show and record a multi-part series")
-    actions = series.add_subparsers(dest="series_command", required=True)
-    plan = actions.add_parser("plan", help="Propose an outline from the sources saved in drafts/")
-    plan.add_argument("topic", help="The series topic, e.g. evals (its slug names the file)")
-    plan.add_argument(
-        "--since",
-        default=DEFAULT_PLAN_SINCE,
-        help=f"Lookback: 28d, 4w or YYYY-MM-DD ({DEFAULT_PLAN_SINCE})",
-    )
-    plan.add_argument(
+def _saved_sources_options(parser: Any, since: str) -> None:
+    parser.add_argument("--since", default=since, help=f"Lookback: 7d, 4w or YYYY-MM-DD ({since})")
+    parser.add_argument(
         "--drafts-dir",
         type=Path,
         default=DEFAULT_DRAFTS_DIR,
         help="Folder holding <date>.sources/ from earlier runs (default: drafts)",
     )
+
+
+def add_series_parser(sub: Any) -> None:
+    series = sub.add_parser("series", help="Plan, approve, show and record a multi-part series")
+    actions = series.add_subparsers(dest="series_command", required=True)
+    plan = actions.add_parser("plan", help="Propose an outline from the sources saved in drafts/")
+    plan.add_argument("topic", help="The series topic, e.g. evals (its slug names the file)")
+    _saved_sources_options(plan, DEFAULT_PLAN_SINCE)
     plan.add_argument("--overwrite", action="store_true", help="Replace a proposed outline")
     _series_dir_option(plan)
+    revise = actions.add_parser(
+        "revise", help="Revise the remaining planned parts from recently saved sources"
+    )
+    revise.add_argument("slug", help="Series name, e.g. evals")
+    _saved_sources_options(revise, DEFAULT_REVISE_SINCE)
+    _series_dir_option(revise)
     for name, text in (("approve", "Approve a proposed outline"), ("show", "Print an outline")):
         action = actions.add_parser(name, help=text)
         action.add_argument("slug", help="Series name, e.g. evals")
@@ -121,11 +130,11 @@ def _prepare_plan(args: argparse.Namespace) -> _PlanJob:
     return _PlanJob(topic, slug, path, sources, build_planner(model, planner_system_prompt()))
 
 
-def _planning_line(sources: PlanningInput) -> str:
+def _planning_line(sources: PlanningInput, verb: str = "Planning") -> str:
     dirs = sources.dirs
     names = dirs[0].name if len(dirs) == 1 else f"{dirs[0].name} ... {dirs[-1].name}"
     folders = "folder" if len(dirs) == 1 else "folders"
-    return f"Planning from {len(sources.docs)} sources in {len(dirs)} {folders} ({names})"
+    return f"{verb} from {len(sources.docs)} sources in {len(dirs)} {folders} ({names})"
 
 
 def _run_plan(args: argparse.Namespace) -> int:
@@ -204,11 +213,35 @@ def _run_published(args: argparse.Namespace) -> int:
     return 0
 
 
+def _prepare_revise(args: argparse.Namespace) -> tuple[RevisionJob, PlanningInput]:
+    """Everything that can fail before the model call (exit 2)."""
+    settings = load_settings()
+    configure_logging()
+    path = series_path(args.series_dir, args.slug)
+    series = check_revisable(path)
+    now = datetime.now(issue_timezone())
+    sources = collect_sources(args.drafts_dir, parse_since(args.since, now).date())
+    model = make_chat_model(load_planner_model(settings), settings.anthropic_api_key)
+    reviser = build_reviser(model, planner_system_prompt())
+    return RevisionJob(args.slug, path, series, sources.docs, reviser, now.date()), sources
+
+
+def _run_revise(args: argparse.Namespace) -> int:
+    try:
+        job, sources = _prepare_revise(args)
+    except USAGE_ERRORS as exc:
+        print(f"Config error: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    print(_planning_line(sources, "Revising"))
+    return apply_revision(job)
+
+
 RUNNERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "plan": _run_plan,
     "approve": _run_approve,
     "show": _run_show,
     "published": _run_published,
+    "revise": _run_revise,
 }
 
 

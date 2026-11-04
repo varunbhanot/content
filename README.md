@@ -165,7 +165,8 @@ uv run newsletter-machine series approve evals
 uv run newsletter-machine series show evals
 ```
 
-`--overwrite` replaces a proposed outline (an approved one is never re-planned);
+`--overwrite` replaces a proposed outline (an approved one, or one with drafted or published
+parts or revisions, is never re-planned: use `series revise`);
 `--drafts-dir` and `--series-dir` change the folders. `NM_PLANNER_MODEL` picks the model.
 Planning instructions: [`src/newsletter_machine/prompts/planner.md`](src/newsletter_machine/prompts/planner.md).
 
@@ -208,6 +209,39 @@ line for the next planned part (none on the last part). The critic gets series-o
 for this ([`src/newsletter_machine/series_checks.yaml`](src/newsletter_machine/series_checks.yaml)),
 on top of the voice checklist. Summary instructions:
 [`src/newsletter_machine/prompts/summary.md`](src/newsletter_machine/prompts/summary.md).
+
+### When a week's links don't fit the planned part
+
+The relevance check also names the outline part each on-topic source best supports (no extra
+call). Before drafting, `issue --series` prints a fit line, e.g. `Fit: Part 2 has 0 of 3
+on-topic sources; Part 3: 2, new topic: 1`. When fewer than 2 sources support the next planned
+part and another planned part, or a topic the outline lacks, has at least 2, the part is **not
+drafted**. The planner runs once in revise mode instead and proposes a new remaining outline:
+drafted and published parts never change; planned parts may be kept, reordered, merged, split,
+dropped or added (3 to 6 parts in total). The command prints the reason and what changed, writes
+`series/evals.yaml` back as `proposed` with a `revisions` entry (date, reason, changes), and
+exits 0. The revised file is rewritten in full, so the previous file, with your comments, is
+kept as `series/evals.yaml.bak` (a later revision writes `evals.yaml.2.bak` and so on, never
+overwriting an earlier backup). Review it, approve it again, then rerun on the saved sources:
+
+```bash
+uv run newsletter-machine series approve evals
+uv run newsletter-machine issue --series evals --sources drafts/2026-11-11.sources --out drafts/2026-11-11.md
+```
+
+A link saved twice counts once. When a relevance check failed for any source, or the series
+cannot be revised (written parts not first, or already 6 written parts), the run warns and
+drafts the planned part instead. `--keep-outline` skips this and drafts the next planned part anyway (to go back to the approved
+outline after a revision, copy the backup over the series file first). To revise by hand from
+recently saved sources (last 7 days by default; the relevance filter does not run here, so
+sources parked earlier are included and the planner is asked to ignore off-topic ones):
+
+```bash
+uv run newsletter-machine series revise evals --since 7d
+```
+
+A revision that fails (model error, or the file was edited during the run) exits 1 and leaves
+the series file as it was. Until you approve a revised outline, no series is active.
 
 ## Weekly schedule: `weekly` and Managed Deep Agents
 
@@ -374,7 +408,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy src
 | `NM_FAST_MODEL` | `anthropic:claude-haiku-5-5` | Cheap summarisation model |
 | `NM_CRITIC_MODEL` | writer model | Voice critic model |
 | `NM_EDITOR_MODEL` | writer model | Lead editor model for `issue` |
-| `NM_PLANNER_MODEL` | writer model | Series planner model for `series plan` |
+| `NM_PLANNER_MODEL` | writer model | Series planner model for `series plan` and `series revise` (and the revision `issue --series` may run) |
 | `NM_RELEVANCE_MODEL` | fast model | Per-source relevance filter for `issue --series` |
 | `NM_SUMMARY_MODEL` | fast model | One-line summary of each drafted series part |
 | `NM_MAX_REVISIONS` | `1` | Critique → revise loops per issue (0 to 3) |

@@ -34,8 +34,10 @@ from newsletter_machine.cli_common import (
 )
 from newsletter_machine.cli_issue_series import (
     SeriesJob,
+    SeriesModels,
     SeriesTarget,
     add_series_options,
+    adjust_outline,
     continuity_note,
     filter_sources,
     finish_series,
@@ -49,6 +51,7 @@ from newsletter_machine.config import (
     Settings,
     load_editor_settings,
     load_ingest_settings,
+    load_planner_model,
     load_relevance_model,
     load_settings,
     load_summary_model,
@@ -212,8 +215,14 @@ def _prepare(args: argparse.Namespace) -> _Job:
     series = None
     if target is not None:
         key = settings.anthropic_api_key
-        relevance = make_chat_model(load_relevance_model(settings), key)
-        series = series_job(target, relevance, make_chat_model(load_summary_model(settings), key))
+        models = SeriesModels(
+            relevance=make_chat_model(load_relevance_model(settings), key),
+            summary=make_chat_model(load_summary_model(settings), key),
+            planner=None
+            if target.keep_outline
+            else make_chat_model(load_planner_model(settings), key),
+        )
+        series = series_job(target, models)
         print(f"Drafting {series.label}")
         note = continuity_note(target)
         if note:
@@ -410,14 +419,21 @@ def run_issue(args: argparse.Namespace) -> int:
 def _draft_series(
     job: _Job, series: SeriesJob, docs: tuple[SourceDoc, ...], args: argparse.Namespace
 ) -> int:
-    """Filter to on-topic sources, draft the part, then mark it drafted (exit 0 only)."""
-    relevance = filter_sources(series, docs, args.sources or job.paths.sources)
+    """Filter to on-topic sources; revise the outline when they fit another part better;
+    otherwise draft the part, then mark it drafted (exit 0 only)."""
+    sources_dir = args.sources or job.paths.sources
+    relevance = filter_sources(series, docs, sources_dir)
     if relevance is None:
         return EXIT_ERROR
     if not usable_sources(relevance.kept):
         part = series.target.part.number
         print(f"No on-topic sources for Part {part}; nothing to draft.")
         return 0
+    revised = adjust_outline(
+        series, relevance, sources_dir, job.paths.draft, overwrite=args.overwrite
+    )
+    if revised is not None:
+        return revised
     lines = source_lines(relevance.parked), source_lines(relevance.unchecked)
     steer = _Steer(series.angle, series.label, *lines, context=series.context)
     code = _draft(job, relevance.kept, steer)

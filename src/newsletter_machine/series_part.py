@@ -5,6 +5,7 @@ researcher and writer all see the topic, the outline and this part's brief; from
 also what earlier parts said, linked and promised, and how to open and close.
 """
 
+from itertools import takewhile
 from pathlib import Path
 
 from newsletter_machine.series import ARC_SEPARATOR, Series, SeriesPart
@@ -33,12 +34,32 @@ def check_draftable(series: Series, path: Path, slug: str) -> SeriesPart:
     return part
 
 
-def _outline_lines(series: Series, current: SeriesPart) -> list[str]:
-    return [
-        f"- Part {part.number}: {part.title}. {part.question}"
-        + (" (this part)" if part.number == current.number else "")
-        for part in series.parts
-    ]
+def split_outline(
+    series: Series, path: Path
+) -> tuple[tuple[SeriesPart, ...], tuple[SeriesPart, ...]]:
+    """``(written, planned)``: the drafted and published parts, which a revision never
+    changes, then the planned ones it may rework. ``ValueError`` unless every written part
+    comes before every planned one and at least one planned part is left."""
+    written = tuple(takewhile(lambda part: part.status != "planned", series.parts))
+    planned = series.parts[len(written) :]
+    if not planned:
+        raise ValueError(f"{path} has no planned part left to revise.")
+    late = next((part for part in planned if part.status != "planned"), None)
+    if late is not None:
+        raise ValueError(
+            f"{path}: Part {late.number} is {late.status} after a planned part; a revision "
+            "needs the drafted and published parts first. Fix the statuses by hand."
+        )
+    return written, planned
+
+
+def _outline_lines(series: Series, current: SeriesPart, *, mark_written: bool = False) -> list[str]:
+    def mark(part: SeriesPart) -> str:
+        if part.number == current.number:
+            return " (this part)"
+        return f" ({part.status})" if mark_written and part.status != "planned" else ""
+
+    return [f"- Part {p.number}: {p.title}. {p.question}{mark(p)}" for p in series.parts]
 
 
 def previous_part(series: Series, part: SeriesPart) -> SeriesPart | None:
@@ -140,8 +161,13 @@ def series_angle(series: Series, part: SeriesPart) -> str:
 
 
 def relevance_context(series: Series, part: SeriesPart) -> str:
-    """What the relevance filter judges each source against: topic and outline."""
-    lines = [f"Series topic: {series.topic}", "Outline:", *_outline_lines(series, part)]
+    """What the relevance filter judges each source against: topic and outline, with parts
+    already written marked, so its ``best_part`` points at parts still to come."""
+    lines = [
+        f"Series topic: {series.topic}",
+        "Outline:",
+        *_outline_lines(series, part, mark_written=True),
+    ]
     return neutralise_tags("\n".join(lines))
 
 

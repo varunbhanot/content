@@ -1,9 +1,10 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 import yaml
 
-from newsletter_machine.series import Series, SeriesPart, SourceRef
+from newsletter_machine.series import Revision, Series, SeriesPart, SourceRef
 from newsletter_machine.series_store import (
     Approval,
     approved_slugs,
@@ -19,6 +20,7 @@ from newsletter_machine.series_store import (
     render_series_yaml,
     save_approval,
     save_publication,
+    save_revision,
     save_series,
     series_path,
 )
@@ -536,3 +538,66 @@ def test_check_markable_refuses_a_part_no_longer_planned(tmp_path: Path) -> None
     mark_drafted(path, "evals", 1, "drafts/a.md")
     with pytest.raises(ValueError, match="Part 1 is drafted, not planned"):
         check_markable(path, 1)
+
+
+def _written(path: Path) -> Series:
+    series = _series("approved")
+    first = replace(series.parts[0], status="published", url="https://example.com/p/1")
+    series = replace(series, parts=(first, *series.parts[1:]))
+    save_series(path, series, "evals")
+    return series
+
+
+def _revised(series: Series) -> Series:
+    revision = Revision("2026-11-11", "Judges first.", ("Part 2 is new: Judges",))
+    second = replace(series.parts[1], title="Judges")
+    return replace(
+        series, status="proposed", parts=(series.parts[0], second, series.parts[2]),
+        revisions=(revision,),
+    )  # fmt: skip
+
+
+def test_save_revision_keeps_a_backup_and_rewrites(tmp_path: Path) -> None:
+    path = tmp_path / "evals.yaml"
+    before = _written(path)
+    original = path.read_text(encoding="utf-8") + "# Varun's note\n"
+    path.write_text(original, encoding="utf-8")
+    revised = _revised(before)
+
+    backup = save_revision(path, "evals", before, revised)
+
+    assert backup == tmp_path / "evals.yaml.bak"
+    assert backup.read_text(encoding="utf-8") == original
+    assert load_series(path) == revised
+    assert approved_slugs(tmp_path) == ()  # the backup is never read as a series
+
+
+def test_save_revision_refuses_a_file_changed_during_the_run(tmp_path: Path) -> None:
+    path = tmp_path / "evals.yaml"
+    before = _written(path)
+    save_series(path, replace(before, topic="other"), "evals")
+    with pytest.raises(ValueError, match="changed during the run"):
+        save_revision(path, "evals", before, _revised(before))
+    assert not (tmp_path / "evals.yaml.bak").exists()
+
+
+def test_check_can_plan_never_replaces_written_parts_or_revisions(tmp_path: Path) -> None:
+    path = tmp_path / "evals.yaml"
+    save_series(path, replace(_written(path), status="proposed"), "evals")
+    with pytest.raises(ValueError, match="has drafted or published parts or revisions"):
+        check_can_plan(path, overwrite=True)
+    save_series(path, _revised(_series()), "evals")
+    with pytest.raises(ValueError, match="has drafted or published parts or revisions"):
+        check_can_plan(path, overwrite=True)
+
+
+def test_save_revision_never_overwrites_an_earlier_backup(tmp_path: Path) -> None:
+    path = tmp_path / "evals.yaml"
+    before = _written(path)
+    first = save_revision(path, "evals", before, _revised(before))
+    approved_text = first.read_text(encoding="utf-8")
+    again = load_series(path)
+    second = save_revision(path, "evals", again, replace(again, topic="evals again"))
+    assert second == tmp_path / "evals.yaml.2.bak"
+    assert first.read_text(encoding="utf-8") == approved_text
+    assert approved_slugs(tmp_path) == ()

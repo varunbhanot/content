@@ -89,6 +89,7 @@ def issue_args(out: Path, *, overwrite: bool = False) -> argparse.Namespace:
         angle=None,
         series=None,  # Phase 5 of series mode passes the approved series here
         series_dir=DEFAULT_SERIES_DIR,
+        keep_outline=False,
         sources=None,
         links_file=None,
         since=None,

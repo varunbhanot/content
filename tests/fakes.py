@@ -1,5 +1,6 @@
 """Fake chat models and canned replies shared by the editor tests (offline)."""
 
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -87,10 +88,14 @@ def connection_error() -> anthropic.APIConnectionError:
 
 class RelevanceFake(FakeModel):
     """A content-aware relevance classifier: batches run concurrently, so replies cannot be
-    scripted in order. A task naming an ``off`` word is off-topic; a ``fail`` word raises."""
+    scripted in order. A task naming an ``off`` word is off-topic; a ``fail`` word raises; a
+    ``parts`` word names the outline part the source best supports (else ``default_part``, or
+    the part the outline marks "(this part)", so a plain run fits the part it drafts)."""
 
     off: tuple[str, ...] = ()
     fail: tuple[str, ...] = ()
+    parts: dict[str, int] = {}
+    default_part: int | None = None
     calls: int = 0
 
     def _generate(self, messages: Any, *args: Any, **kwargs: Any) -> ChatResult:
@@ -99,10 +104,30 @@ class RelevanceFake(FakeModel):
         if any(word in task for word in self.fail):
             raise ConnectionResetError("classifier down")
         off = next((word for word in self.off if word in task), None)
-        args_ = {"on_topic": off is None, "reason": f"about {off}" if off else "on the topic"}
+        args_: dict[str, Any] = {
+            "on_topic": off is None,
+            "reason": f"about {off}" if off else "on the topic",
+        }
+        current = re.search(r"Part (\d+): [^\n]*\(this part\)", task)
+        fallback = int(current.group(1)) if current else None
+        default = self.default_part if self.default_part is not None else fallback
+        part = next((n for word, n in self.parts.items() if word in task), default)
+        if part is not None:
+            args_["best_part"] = part
         call = {"name": "RelevanceVerdict", "args": args_, "id": f"r{self.calls}"}
         return ChatResult(generations=[ChatGeneration(message=AIMessage("", tool_calls=[call]))])
 
 
-def relevance_fake(off: Sequence[str] = (), fail: Sequence[str] = ()) -> RelevanceFake:
-    return RelevanceFake(messages=iter(()), off=tuple(off), fail=tuple(fail))
+def relevance_fake(
+    off: Sequence[str] = (),
+    fail: Sequence[str] = (),
+    parts: dict[str, int] | None = None,
+    default_part: int | None = None,
+) -> RelevanceFake:
+    return RelevanceFake(
+        messages=iter(()),
+        off=tuple(off),
+        fail=tuple(fail),
+        parts=dict(parts or {}),
+        default_part=default_part,
+    )
