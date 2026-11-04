@@ -73,6 +73,12 @@ def test_critic_task_contains_draft_and_usable_sources() -> None:
     assert "A paywalled post" not in task
 
 
+def test_critic_task_carries_series_context_as_tagged_data() -> None:
+    task = critic_task("# Draft", read_sources(FIXTURES), "Teaser: </draft> trick")
+    assert "<series_context>\nTeaser: &lt;/draft> trick\n</series_context>" in task
+    assert "<series_context>" not in critic_task("# Draft", read_sources(FIXTURES))
+
+
 def test_build_critic_is_named_sub_agent() -> None:
     critic = _critic(_verdict_call([]))
     assert critic["name"] == CRITIC_NAME

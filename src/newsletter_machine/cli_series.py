@@ -1,7 +1,8 @@
-"""``newsletter-machine series plan | approve | show``: propose, lock and read a series outline.
+"""``newsletter-machine series plan | approve | show | published``: propose, lock and read a
+series outline, and record where a part went live.
 
 Exit codes as elsewhere: 0 done, 1 model or write failure, 2 configuration or usage error
-(always before any model call). ``approve`` and ``show`` need no API key.
+(always before any model call). ``approve``, ``show`` and ``published`` need no API key.
 """
 
 import argparse
@@ -37,7 +38,9 @@ from newsletter_machine.series_store import (
     check_approval,
     check_can_plan,
     load_series,
+    plan_publication,
     save_approval,
+    save_publication,
     save_series,
     series_path,
 )
@@ -61,7 +64,7 @@ def _series_dir_option(parser: Any) -> None:
 
 
 def add_series_parser(sub: Any) -> None:
-    series = sub.add_parser("series", help="Plan, approve and show a multi-part series")
+    series = sub.add_parser("series", help="Plan, approve, show and record a multi-part series")
     actions = series.add_subparsers(dest="series_command", required=True)
     plan = actions.add_parser("plan", help="Propose an outline from the sources saved in drafts/")
     plan.add_argument("topic", help="The series topic, e.g. evals (its slug names the file)")
@@ -82,6 +85,11 @@ def add_series_parser(sub: Any) -> None:
         action = actions.add_parser(name, help=text)
         action.add_argument("slug", help="Series name, e.g. evals")
         _series_dir_option(action)
+    published = actions.add_parser("published", help="Record a drafted part's live URL")
+    published.add_argument("slug", help="Series name, e.g. evals")
+    published.add_argument("number", type=int, help="Part number, e.g. 1")
+    published.add_argument("url", help="The published post's http(s) address")
+    _series_dir_option(published)
 
 
 @dataclass(frozen=True)
@@ -176,10 +184,31 @@ def _run_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_published(args: argparse.Namespace) -> int:
+    try:
+        publication = plan_publication(args.series_dir, args.slug, args.number, args.url)
+    except USAGE_ERRORS as exc:
+        print(f"Config error: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    where = f"Part {publication.number} published at {publication.url} in {publication.path}"
+    if not publication.changed:
+        print(f"{where} is already recorded.")
+        return 0
+    try:
+        kept = save_publication(publication)
+    except USAGE_ERRORS as exc:  # the file changed or became unwritable meanwhile
+        print(f"Could not write the series: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    rewritten = "" if kept else " (file rewritten in full: comments were not kept)"
+    print(f"Recorded {where}{rewritten}")
+    return 0
+
+
 RUNNERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "plan": _run_plan,
     "approve": _run_approve,
     "show": _run_show,
+    "published": _run_published,
 }
 
 

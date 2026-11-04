@@ -179,12 +179,16 @@ def test_format_outline_shows_draft_and_url_when_set() -> None:
         thin=True,
         draft="drafts/x.md",
         url="https://x.example/p",
+        summary="Demos lie.",
+        teaser="Next in this series: golden sets.",
     )
     text = format_outline(Series(topic="evals", status="approved", parts=(part,)), "evals")
 
     assert "Part 1 [free, published] T  THIN: needs more reading" in text
     assert "  Draft: drafts/x.md" in text
     assert "  URL: https://x.example/p" in text
+    assert "  Summary: Demos lie." in text
+    assert "  Teaser: Next in this series: golden sets." in text
 
 
 def test_null_optional_fields_read_as_empty() -> None:
@@ -202,3 +206,10 @@ def test_source_urls_are_case_insensitive_like_ingest() -> None:
     assert parse_series(_data(parts=[part]), "f").parts[0].sources[0].url == (
         "HTTPS://Example.com/a"
     )
+
+
+@pytest.mark.parametrize("url", ["http://[::1", "https://", "ftp://a.b", "https://a b"])
+def test_is_web_url_rejects_bad_addresses_without_raising(url: str) -> None:
+    from newsletter_machine.series import is_web_url
+
+    assert is_web_url(url) is False

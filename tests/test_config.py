@@ -11,6 +11,7 @@ from newsletter_machine.config import (
     load_planner_model,
     load_relevance_model,
     load_settings,
+    load_summary_model,
 )
 
 
@@ -263,3 +264,21 @@ def test_relevance_model_requires_provider_prefix(make_voice_dir: Callable[..., 
     env = {**env, "NM_RELEVANCE_MODEL": "r"}
     with pytest.raises(ConfigError, match="NM_RELEVANCE_MODEL"):
         load_relevance_model(load_settings(env), env)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"), [("", "anthropic:f"), (" anthropic:s ", "anthropic:s")]
+)
+def test_summary_model_defaults_to_fast_model(
+    make_voice_dir: Callable[..., Path], value: str, expected: str
+) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    env = {**env, "NM_FAST_MODEL": "anthropic:f", "NM_SUMMARY_MODEL": value}
+    assert load_summary_model(load_settings(env), env) == expected
+
+
+def test_summary_model_requires_provider_prefix(make_voice_dir: Callable[..., Path]) -> None:
+    env = {"ANTHROPIC_API_KEY": "k", "NM_VOICE_DIR": str(make_voice_dir())}
+    env = {**env, "NM_SUMMARY_MODEL": "s"}
+    with pytest.raises(ConfigError, match="NM_SUMMARY_MODEL"):
+        load_summary_model(load_settings(env), env)
