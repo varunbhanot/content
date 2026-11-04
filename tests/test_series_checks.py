@@ -77,8 +77,11 @@ def test_a_middle_part_gets_link_back_teaser_and_closing_checks_filled_in() -> N
     assert _ids(combined) == ["series-link-back", "series-teaser-delivered", "series-next-teaser"]
     link, teaser, _ = combined.items[len(BASE.items) :]
     assert '"Title 1", https://example.com/p/1' in link.rule
-    assert "as recorded: Demos lie." in link.check
-    assert 'promised: "Next in this series: golden sets."' in teaser.check
+    assert "opening-move" in link.check  # the link-back clause may precede the opening move
+    # draft-derived text stays out of the system prompt: it reaches the critic as user data
+    text = " ".join(i.rule + i.check for i in combined.items)
+    assert "Demos lie." not in text and "golden sets" not in text
+    assert "series context" in teaser.check
 
 
 def test_the_final_part_gets_the_code_checked_no_teaser_item() -> None:
@@ -88,7 +91,7 @@ def test_the_final_part_gets_the_code_checked_no_teaser_item() -> None:
     combined = series_checklist(BASE, series, part, load_series_checks(SECTIONS))
     assert _ids(combined) == ["series-link-back", "series-final-no-teaser"]
     link, final = combined.items[len(BASE.items) :]
-    assert "not published yet" in link.rule and "(no summary recorded)" in link.check
+    assert "not published yet" in link.rule
     assert final.is_mechanical
     assert run_mechanical(final, "# T\n\n*Next in this series: more.*\n").status == "fail"
     assert run_mechanical(final, "# T\n\nThe end.\n").status == "pass"

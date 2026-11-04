@@ -2,8 +2,10 @@
 
 The items live in ``series_checks.yaml`` beside this module, in the voice checklist's schema,
 and load through the same validator (``checklist.load_checklist``). Code picks the items that
-apply to the part being drafted and fills their ``$placeholders`` from the series file; the
-writer then targets them and the critic judges them like any other item.
+apply to the part being drafted and fills their ``$placeholders`` from the approved outline
+(numbers, titles, questions, the recorded URL); the writer then targets them and the critic
+judges them like any other item. Draft-derived text (the previous summary and teaser) never
+goes into these system-prompt items: the critic gets it as tagged data in its user message.
 """
 
 from collections.abc import Mapping
@@ -14,7 +16,7 @@ from string import Template
 
 from newsletter_machine.checklist import Checklist, ChecklistItem, load_checklist
 from newsletter_machine.series import Series, SeriesPart
-from newsletter_machine.series_part import NO_SUMMARY, following_part, previous_part
+from newsletter_machine.series_part import following_part, previous_part
 from newsletter_machine.writer import neutralise_tags
 
 CHECKS_FILE = "series_checks.yaml"
@@ -27,8 +29,6 @@ PLACEHOLDERS = (
     "previous_number",
     "previous_title",
     "previous_link",
-    "previous_summary",
-    "previous_teaser",
     "next_number",
     "next_title",
     "next_question",
@@ -73,8 +73,6 @@ def _values(previous: SeriesPart | None, following: SeriesPart | None) -> dict[s
             "previous_number": str(previous.number),
             "previous_title": previous.title,
             "previous_link": previous.url or "not published yet",
-            "previous_summary": previous.summary or NO_SUMMARY,
-            "previous_teaser": previous.teaser,
         }
     if following is not None:
         values |= {

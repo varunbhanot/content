@@ -363,8 +363,16 @@ PUBLISHED = replace(
 
 def _capture_writer_and_critic(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
     """Record the writer tasks and the critic system prompt the run builds."""
-    seen: dict[str, list[str]] = {"writer": [], "critic_prompt": []}
+    seen: dict[str, list[str]] = {"writer": [], "critic_prompt": [], "critic_task": []}
     original_task = editor_subagents.revision_task
+    original_critic_task = editor_subagents.critic_task
+
+    def _critic_task(*args: Any) -> str:
+        text = original_critic_task(*args)
+        seen["critic_task"].append(text)
+        return text
+
+    monkeypatch.setattr(editor_subagents, "critic_task", _critic_task)
     original_prompt = drafting.critic_system_prompt
 
     def _task(*args: Any) -> str:
@@ -398,6 +406,9 @@ def test_series_issue_carries_the_previous_part_forward_and_records_what_this_on
     critic_prompt = seen["critic_prompt"][0]
     for item in ("series-link-back", "series-teaser-delivered", "series-next-teaser"):
         assert f"id: {item}" in critic_prompt
+    assert "how to build a golden set" not in critic_prompt  # draft-derived: user data only
+    assert "<series_context>" in seen["critic_task"][0]
+    assert "how to build a golden set" in seen["critic_task"][0]
     assert "Summary: Golden sets turn vibes into data." in out
     assert "Teaser: Next in this series: judges, and when to trust them." in out
     part = load_series(path).parts[1]
@@ -478,3 +489,26 @@ def test_series_issue_does_not_record_a_teaser_on_the_final_part(
     assert "final part" in capsys.readouterr().err
     part = load_series(path).parts[2]
     assert (part.status, part.teaser) == ("drafted", "")
+
+
+def test_series_issue_skips_the_summary_when_the_part_changed_during_the_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _series_file(tmp_path)
+    _use_models(monkeypatch)
+    original = cli_issue.run_editor
+    summaries: list[str] = []
+
+    def _run(*args: Any) -> Any:
+        result = original(*args)
+        drafted = replace(SERIES.parts[1], status="drafted")  # Varun edited the file meanwhile
+        save_series(
+            path, replace(SERIES, parts=(SERIES.parts[0], drafted, SERIES.parts[2])), "evals"
+        )
+        return result
+
+    monkeypatch.setattr(cli_issue, "run_editor", _run)
+    monkeypatch.setattr(cli_issue_series, "summarise_part", lambda *a: summaries.append("x") or "")
+    assert _series_issue(tmp_path) == 1
+    assert "Part 2 is drafted, not planned" in capsys.readouterr().err
+    assert summaries == []

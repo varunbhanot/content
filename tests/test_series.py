@@ -206,3 +206,10 @@ def test_source_urls_are_case_insensitive_like_ingest() -> None:
     assert parse_series(_data(parts=[part]), "f").parts[0].sources[0].url == (
         "HTTPS://Example.com/a"
     )
+
+
+@pytest.mark.parametrize("url", ["http://[::1", "https://", "ftp://a.b", "https://a b"])
+def test_is_web_url_rejects_bad_addresses_without_raising(url: str) -> None:
+    from newsletter_machine.series import is_web_url
+
+    assert is_web_url(url) is False

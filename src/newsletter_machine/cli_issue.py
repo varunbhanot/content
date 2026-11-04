@@ -251,6 +251,7 @@ class _Steer:
     series: str = ""  # the series label; blank for a plain issue
     parked: tuple[str, ...] = ()
     unchecked: tuple[str, ...] = ()
+    context: str = ""  # series continuity facts for the critic; blank for a plain issue
 
 
 @dataclass(frozen=True)
@@ -272,6 +273,7 @@ def _pipeline(job: _Job, docs: tuple[SourceDoc, ...], steer: _Steer) -> _Pipelin
         writer_version=agents.phase3.writer_version,
         critic_version=agents.phase3.critic_version,
         series_label=steer.series,
+        series_context=steer.context,
     )
     subagents = build_editor_subagents(
         inputs,
@@ -417,7 +419,7 @@ def _draft_series(
         print(f"No on-topic sources for Part {part}; nothing to draft.")
         return 0
     lines = source_lines(relevance.parked), source_lines(relevance.unchecked)
-    steer = _Steer(series.angle, series.label, *lines)
+    steer = _Steer(series.angle, series.label, *lines, context=series.context)
     code = _draft(job, relevance.kept, steer)
     return finish_series(series, code, job.paths.draft)
 

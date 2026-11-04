@@ -24,9 +24,11 @@ logger = logging.getLogger(__name__)
 SUMMARY_NAME = "summary"
 SUMMARY_DRAFT_CHARS = 12_000  # a ~1,000-word part fits; the cap bounds a runaway draft
 MAX_SUMMARY_CHARS = 300  # one sentence; the series file and the next angle stay short
-# an emphasised line (italic or bold, whole or in part, maybe quoted) opening with the phrase
+# an emphasised line (italic or bold, whole or in part, maybe quoted) opening with the phrase;
+# the marker touches the word, so a "* " bullet is not emphasis. series_checks.yaml's
+# series-final-no-teaser pattern is the same regex (a test keeps them in step).
 TEASER_LINE = re.compile(
-    r"^[ \t]*(?:>[ \t]*)?[*_]+[ \t]*Next in this series\b.*$", re.IGNORECASE | re.MULTILINE
+    r"^[ \t]*(?:>[ \t]*)?[*_]+Next in this series\b.*$", re.IGNORECASE | re.MULTILINE
 )
 EMPHASIS = re.compile(r"\*+|^_+|_+$")
 

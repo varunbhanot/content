@@ -6,6 +6,7 @@ import pytest
 from newsletter_machine.series import Series, SeriesPart
 from newsletter_machine.series_part import (
     check_draftable,
+    continuity_facts,
     following_part,
     next_part,
     previous_part,
@@ -183,3 +184,17 @@ def test_series_angle_for_the_final_part_has_no_teaser() -> None:
     text = series_angle(series, series.parts[1])
     assert "final part" in text
     assert "do not add" in text
+
+
+def test_continuity_facts_give_the_previous_summary_and_teaser() -> None:
+    series = _continued("published", "planned")
+    facts = continuity_facts(series, series.parts[1])
+    assert "Part 1 (Title 1) summary: Summary 1." in facts
+    assert 'Part 1 closing teaser: "Next in this series: promise 1."' in facts
+    assert continuity_facts(series, series.parts[0]) == ""
+
+
+def test_continuity_facts_without_a_recorded_teaser() -> None:
+    series = _series("drafted", "planned")
+    facts = continuity_facts(series, series.parts[1])
+    assert "summary: (no summary recorded)" in facts and "teaser" not in facts

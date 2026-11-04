@@ -78,7 +78,8 @@ def _previous_lines(previous: SeriesPart) -> list[str]:
     )
     opening = (
         f'Opening: start with a one-clause link back to Part {n} ("Last time we talked '
-        f'about ..."); {link}. Keep the recap to one clause, then move on to this part.'
+        f'about ..."); {link}. Keep the recap to one clause, then open this part the '
+        "way the style guide says."
     )
     if previous.teaser:
         opening += " Deliver what that teaser promised."
@@ -97,6 +98,19 @@ def _closing_line(following: SeriesPart | None) -> str:
         f'pointing to Part {following.number} ("{following.title}": {following.question}), '
         'starting "*Next in this series:".'
     )
+
+
+def continuity_facts(series: Series, part: SeriesPart) -> str:
+    """What the critic's continuity checks compare against: the previous part's recorded
+    summary and teaser (draft-derived, so passed as data); "" for Part 1."""
+    previous = previous_part(series, part)
+    if previous is None:
+        return ""
+    n = previous.number
+    lines = [f"Part {n} ({previous.title}) summary: {previous.summary or NO_SUMMARY}"]
+    if previous.teaser:
+        lines.append(f'Part {n} closing teaser: "{previous.teaser}"')
+    return neutralise_tags("\n".join(lines))
 
 
 def series_angle(series: Series, part: SeriesPart) -> str:

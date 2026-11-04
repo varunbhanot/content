@@ -31,6 +31,7 @@ from newsletter_machine.series import Series, SeriesPart
 from newsletter_machine.series_checks import load_series_checks, series_checklist
 from newsletter_machine.series_part import (
     check_draftable,
+    continuity_facts,
     following_part,
     previous_part,
     relevance_context,
@@ -39,6 +40,7 @@ from newsletter_machine.series_part import (
 )
 from newsletter_machine.series_store import (
     DEFAULT_SERIES_DIR,
+    check_markable,
     draft_location,
     draft_reference,
     load_series,
@@ -93,6 +95,11 @@ class SeriesJob:
     @property
     def angle(self) -> str:
         return series_angle(self.target.series, self.target.part)
+
+    @property
+    def context(self) -> str:
+        """The previous part's summary and teaser, for the critic's continuity checks."""
+        return continuity_facts(self.target.series, self.target.part)
 
 
 def _check_new_draft(series: Series, path: Path, out: Path) -> None:
@@ -237,9 +244,10 @@ def finish_series(job: SeriesJob, code: int, draft: Path) -> int:
             file=sys.stderr,
         )
         return code
-    summary, teaser = _carried_forward(job, draft)
-    reference = draft_reference(t.path, draft)
     try:
+        check_markable(t.path, t.part.number)  # before the paid summary call
+        summary, teaser = _carried_forward(job, draft)
+        reference = draft_reference(t.path, draft)
         kept = mark_drafted(
             t.path, t.slug, t.part.number, reference, summary=summary, teaser=teaser
         )

@@ -24,7 +24,7 @@ WRITER_DESCRIPTION = (
 )
 MAX_SOURCE_CHARS = 24_000  # ~6k tokens per source keeps a week's run within the cost budget
 WRAPPER_TAG = re.compile(
-    r"<(\s*/?\s*(?:source|draft|brief|research_notes|critique)\b)", re.IGNORECASE
+    r"<(\s*/?\s*(?:source|draft|brief|research_notes|critique|series_context)\b)", re.IGNORECASE
 )
 WRAPPING_FENCE = re.compile(r"(?:^|\n)(```|~~~)[\w-]*[ \t]*\n(.*)\n\1\s*\Z", re.DOTALL)
 TITLE_LINE = re.compile(r"^# ", re.MULTILINE)

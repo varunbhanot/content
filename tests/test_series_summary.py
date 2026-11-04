@@ -55,6 +55,7 @@ def test_extract_teaser_accepts_underscores_and_picks_the_last() -> None:
         "# T\n\nNo teaser here.\n",
         "# T\n\nNext in this series: plain text.\n",
         "# T\n\n*Next up: something else.*\n",
+        "# T\n\n* Next in this series of failures, the retriever drifts.\n",
     ],
 )
 def test_extract_teaser_is_empty_without_an_italic_next_line(draft: str) -> None:
@@ -86,3 +87,25 @@ def test_summarise_part_caps_a_long_answer() -> None:
 def test_summarise_part_refuses_an_empty_answer() -> None:
     with pytest.raises(AgentOutputError, match="empty summary"):
         summarise_part(build_summariser(fake("  "), "system"), DRAFT)
+
+
+@pytest.mark.parametrize(
+    ("line", "hit"),
+    [
+        ("*Next in this series: judges.*", True),
+        ("> **Next in this series:** judges.", True),
+        ("* Next in this series of failures, a bullet.", False),
+        ("Prose naming the Next in this series line.", False),
+    ],
+)
+def test_the_final_part_check_and_the_teaser_regex_agree(line: str, hit: bool) -> None:
+    from fakes import VOICE
+    from newsletter_machine.grounding import load_grounding
+    from newsletter_machine.series_checks import FINAL_NO_TEASER, load_series_checks
+    from newsletter_machine.voice import style_guide_sections
+
+    sections = style_guide_sections(load_grounding(VOICE).style_guide)
+    item = next(i for i in load_series_checks(sections).items if i.id == FINAL_NO_TEASER)
+    draft = f"# T\n\n{line}\n"
+    assert bool(extract_teaser(draft)) is hit
+    assert any(p.search(draft) for p in item.patterns) is hit

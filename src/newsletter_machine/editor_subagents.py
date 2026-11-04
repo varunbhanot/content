@@ -85,6 +85,7 @@ class EditorInputs:
     writer_version: int
     critic_version: int
     series_label: str = ""  # names the series part in critique reports; blank otherwise
+    series_context: str = ""  # what earlier parts said and promised, for the series checks
 
 
 @dataclass(frozen=True)
@@ -164,7 +165,9 @@ def critique_version(
     inputs: EditorInputs, critic: CompiledSubAgent, draft: str, version: int
 ) -> CritiqueResult:
     """Critique one draft version: rendered report plus a small JSON-able summary."""
-    critique = run_critic(critic, critic_task(draft, inputs.docs), inputs.checklist, draft)
+    critique = run_critic(
+        critic, critic_task(draft, inputs.docs, inputs.series_context), inputs.checklist, draft
+    )
     meta = ReportMeta(
         draft_name=f"{inputs.draft_name} (draft v{version})",
         words=prose_words(draft),

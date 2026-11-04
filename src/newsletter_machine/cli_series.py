@@ -64,7 +64,7 @@ def _series_dir_option(parser: Any) -> None:
 
 
 def add_series_parser(sub: Any) -> None:
-    series = sub.add_parser("series", help="Plan, approve and show a multi-part series")
+    series = sub.add_parser("series", help="Plan, approve, show and record a multi-part series")
     actions = series.add_subparsers(dest="series_command", required=True)
     plan = actions.add_parser("plan", help="Propose an outline from the sources saved in drafts/")
     plan.add_argument("topic", help="The series topic, e.g. evals (its slug names the file)")

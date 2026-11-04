@@ -63,7 +63,12 @@ class Series:
 
 def is_web_url(value: str) -> bool:
     """An absolute http(s) address with a host, and no spaces."""
-    return bool(URL_PATTERN.fullmatch(value)) and bool(urlsplit(value).hostname)
+    if not URL_PATTERN.fullmatch(value):
+        return False
+    try:
+        return bool(urlsplit(value).hostname)
+    except ValueError:  # e.g. an unclosed IPv6 bracket
+        return False
 
 
 def is_slug(value: str) -> bool:

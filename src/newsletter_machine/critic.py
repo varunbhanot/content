@@ -77,11 +77,18 @@ def critic_system_prompt(grounding: Grounding, prompt: Prompt | None = None) -> 
     )
 
 
-def critic_task(draft: str, docs: Iterable[SourceDoc]) -> str:
-    """The user message for the critic: the draft, then the sources to fact-check against."""
+def critic_task(draft: str, docs: Iterable[SourceDoc], series_context: str = "") -> str:
+    """The user message for the critic: the draft, any series context the ``series-`` items
+    refer to (draft-derived, so data), then the sources to fact-check against."""
+    context = (
+        "Series context for the series checklist items:\n"
+        f"<series_context>\n{neutralise_tags(series_context)}\n</series_context>\n\n"
+        if series_context
+        else ""
+    )
     return (
-        f"<draft>\n{neutralise_tags(draft)}\n</draft>\n\nSources the draft was written from:\n\n"
-        + (format_sources(docs))
+        f"<draft>\n{neutralise_tags(draft)}\n</draft>\n\n{context}"
+        "Sources the draft was written from:\n\n" + format_sources(docs)
     )
 
 

@@ -1,4 +1,7 @@
-"""Live part summary (Anthropic API): ``uv run pytest -m live tests/test_series_summary_live.py``."""
+"""Live part summary (Anthropic API).
+
+Run with ``uv run pytest -m live tests/test_series_summary_live.py``.
+"""
 
 import os
 from pathlib import Path

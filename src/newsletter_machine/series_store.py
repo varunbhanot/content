@@ -232,10 +232,17 @@ def _drafted_series(path: Path, series: Series, edit: _PartEdit) -> Series:
         part,
         status="drafted",
         draft=fields["draft"],
-        summary=fields.get("summary", part.summary),
-        teaser=fields.get("teaser", part.teaser),
+        summary=fields["summary"],
+        teaser=fields["teaser"],
     )
     return _with_part(series, drafted)
+
+
+def check_markable(path: Path, number: int) -> None:
+    """``ValueError`` unless part ``number`` can still be marked drafted (re-read now: Varun
+    may have edited the file during the run), checked before any paid follow-up call."""
+    probe = _PartEdit(number, ("planned",), "drafted", {"draft": "", "summary": "", "teaser": ""})
+    _drafted_series(path, load_series(path), probe)
 
 
 def mark_drafted(
@@ -244,10 +251,9 @@ def mark_drafted(
     """Mark part ``number`` drafted with its draft path, one-line summary and closing teaser,
     re-reading the file first (Varun may have edited it during the run). Only those lines
     change, so comments survive; returns False when the file had to be rewritten in full.
-    A blank summary or teaser keeps the one already recorded (e.g. from an earlier draft)."""
+    The record follows the new draft: a blank summary or teaser clears an earlier one."""
     text = _read(path)
-    carried = {"summary": summary.strip(), "teaser": teaser.strip()}
-    fields = {"draft": draft, **{name: value for name, value in carried.items() if value}}
+    fields = {"draft": draft, "summary": summary.strip(), "teaser": teaser.strip()}
     edit = _PartEdit(number, ("planned",), "drafted", fields)
     expected = _drafted_series(path, _parse_text(path, text), edit)
     kept = _write_part_edit(path, slug, text, expected, edit)

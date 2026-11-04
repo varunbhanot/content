@@ -6,9 +6,10 @@
 #   series-teaser-delivered  from Part 2 on, when the previous part recorded a teaser
 #   series-next-teaser       every part but the last
 #   series-final-no-teaser   the last part only (checked by code)
-# $placeholders are filled from the series file: $previous_number, $previous_title,
-# $previous_link, $previous_summary, $previous_teaser, $next_number, $next_title,
-# $next_question.
+# $placeholders are filled from the approved outline: $previous_number, $previous_title,
+# $previous_link, $next_number, $next_title, $next_question. The previous part's summary and
+# teaser are written by models from the draft, so they reach the critic as data in its user
+# message (<series_context>), never here.
 
 version: 1
 items:
@@ -18,19 +19,20 @@ items:
       Open with a one-clause link back to Part $previous_number ("$previous_title",
       $previous_link), then move on to this part.
     check: >-
-      What Part $previous_number argued, as recorded: $previous_summary. Fail if the opening
-      does not link back to Part $previous_number (a Markdown link, or a [VARUN: ...] marker
-      for the link when it is not published yet), or if the recap runs longer than one clause.
-      A recap or callback that matches what Part $previous_number argued is not an invented
-      fact.
+      Fail if the opening does not link back to Part $previous_number (a Markdown link, or a
+      [VARUN: ...] marker for the link when it is not published yet), or if the recap runs
+      longer than one clause. The link-back clause may come before the opening move; judge
+      opening-move on what follows it. A recap or callback that matches Part
+      $previous_number's summary in the series context is not an invented fact.
     severity: must
 
   - id: series-teaser-delivered
     section: Openings
     rule: Deliver what Part $previous_number's closing teaser promised this part would cover.
     check: >-
-      Part $previous_number promised: "$previous_teaser". Fail if this draft does not deliver
-      that promise; quote the closest passage and say what is missing.
+      Part $previous_number's closing teaser is in the series context of the user message.
+      Fail if this draft does not deliver that promise; quote the closest passage and say
+      what is missing.
     severity: must
 
   - id: series-next-teaser
@@ -48,4 +50,4 @@ items:
     rule: This is the final part of the series; do not end with a "Next in this series" line.
     check: Any emphasised line opening with "Next in this series" is a hit.
     severity: must
-    patterns: ['(?m)^[ \t>]*[*_]+[ \t]*next in this series']
+    patterns: ['(?m)^[ \t]*(?:>[ \t]*)?[*_]+next in this series\b']
